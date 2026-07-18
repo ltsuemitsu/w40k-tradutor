@@ -1,0 +1,361 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "updated_at": "2025-01-15T00:00:00",
+    "total_terms": 38,
+    "note": "Glossário inicial (seed) para Warhammer 40K: Rogue Trader. Edite conforme suas preferências de tradução."
+  },
+  "terms": [
+    {
+      "term_english": "Rogue Trader",
+      "term_translated": "Rogue Trader",
+      "category": "lore",
+      "context": "Título oficial do jogo e do universo WH40K. SEMPRE manter em inglês.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Warp",
+      "term_translated": "Warp",
+      "category": "lore",
+      "context": "Dimensão imaterial do WH40K. Manter em inglês ou usar 'Imaterium' consistentemente.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Emperor",
+      "term_translated": "Imperador",
+      "category": "lore",
+      "context": "O Imperador da Humanidade. Com maiúscula quando se refere ao ser divino.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Tech-Priest",
+      "term_translated": "Sacerdote-Tecno",
+      "category": "lore",
+      "context": "Membro do Culto Mechanicus. Manter hífen.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Adeptus Mechanicus",
+      "term_translated": "Adeptus Mechanicus",
+      "category": "lore",
+      "context": "Facção do Culto Mechanicus. Manter em latim/inglês.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Inquisitor",
+      "term_translated": "Inquisidor",
+      "category": "lore",
+      "context": "Agente da Inquisição.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Inquisition",
+      "term_translated": "Inquisição",
+      "category": "lore",
+      "context": "Organização imperial.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Psyker",
+      "term_translated": "Psíquico",
+      "category": "lore",
+      "context": "Indivíduo com poderes psíquicos. Pode manter 'Psyker' se preferir.",
+      "confidence": "medium",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Astropath",
+      "term_translated": "Astropata",
+      "category": "lore",
+      "context": "Psíquico especializado em comunicação FTL.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Navigator",
+      "term_translated": "Navegador",
+      "category": "lore",
+      "context": "Mutante com terceiro olho que navega o Warp. Com maiúscula quando é título/classe.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Voidship",
+      "term_translated": "Nave do Vazio",
+      "category": "lore",
+      "context": "Nave espacial de grande porte no WH40K.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Heresy",
+      "term_translated": "Heresia",
+      "category": "lore",
+      "context": "Crime contra a fé imperial. Frase icônica: 'Heresy grows from idleness'.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Astartes",
+      "term_translated": "Astartes",
+      "category": "lore",
+      "context": "Space Marines. Manter em latim.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Weapon Skill",
+      "term_translated": "Perícia de Armas",
+      "category": "atributo",
+      "context": "Atributo de combate corpo a corpo. Abreviação: WPN (ou WS). NÃO traduzir a abreviação.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Ballistic Skill",
+      "term_translated": "Perícia Balística",
+      "category": "atributo",
+      "context": "Atributo de combate à distância. Abreviação: BAL (ou BS). NÃO traduzir a abreviação.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Strength",
+      "term_translated": "Força",
+      "category": "atributo",
+      "context": "Atributo físico. Abreviação: STR. NÃO traduzir a abreviação.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Toughness",
+      "term_translated": "Resistência",
+      "category": "atributo",
+      "context": "Atributo de resistência. Abreviação: TGH (ou T). NÃO traduzir a abreviação.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Agility",
+      "term_translated": "Agilidade",
+      "category": "atributo",
+      "context": "Atributo de destreza. Abreviação: AGI (ou AG). NÃO traduzir a abreviação.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Intelligence",
+      "term_translated": "Inteligência",
+      "category": "atributo",
+      "context": "Atributo mental. Abreviação: INT. NÃO traduzir a abreviação — INT é INT.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Perception",
+      "term_translated": "Percepção",
+      "category": "atributo",
+      "context": "Atributo sensorial. Abreviação: PER (ou Per). NÃO traduzir a abreviação.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Willpower",
+      "term_translated": "Força de Vontade",
+      "category": "atributo",
+      "context": "Atributo mental. Abreviação: WIL (ou WP). NÃO traduzir a abreviação.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Fellowship",
+      "term_translated": "Socialização",
+      "category": "atributo",
+      "context": "Atributo social. Abreviação: FEL (ou Fel). NÃO traduzir a abreviação.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Action Points",
+      "term_translated": "Pontos de Ação",
+      "category": "mecanica",
+      "context": "Pontos gastos em combate para realizar ações. Abreviação: AP.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Skill Check",
+      "term_translated": "Teste de Perícia",
+      "category": "mecanica",
+      "context": "Rolagem de dados para testar uma perícia.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Damage",
+      "term_translated": "Dano",
+      "category": "mecanica",
+      "context": "Dano em combate. Verbos: 'deals damage' → 'causa dano'.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Health",
+      "term_translated": "Pontos de Vida",
+      "category": "mecanica",
+      "context": "Vitalidade do personagem. Abreviação: HP.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Armour",
+      "term_translated": "Armadura",
+      "category": "mecanica",
+      "context": "Proteção. 'Armour Points' → 'Pontos de Armadura'.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Dodge",
+      "term_translated": "Esquiva",
+      "category": "mecanica",
+      "context": "Ação de esquivar em combate.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Parry",
+      "term_translated": "Aparo",
+      "category": "mecanica",
+      "context": "Ação de aparar em combate corpo a corpo.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Critical Hit",
+      "term_translated": "Acerto Crítico",
+      "category": "mecanica",
+      "context": "Golpe crítico em combate.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Talent",
+      "term_translated": "Talento",
+      "category": "mecanica",
+      "context": "Habilidade especial do personagem (tipo feat/perk).",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Trait",
+      "term_translated": "Característica",
+      "category": "mecanica",
+      "context": "Característica passiva de personagem ou inimigo.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Feat",
+      "term_translated": "Proeza",
+      "category": "mecanica",
+      "context": "Conquista ou habilidade especial.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "The Touched",
+      "term_translated": "Os Tocados",
+      "category": "lore",
+      "context": "Pessoas afetadas pelo Warp. Manter maiúsculas.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Crucible",
+      "term_translated": "Crisol",
+      "category": "lore",
+      "context": "Contexto específico do jogo Rogue Trader.",
+      "confidence": "medium",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Colony",
+      "term_translated": "Colônia",
+      "category": "lore",
+      "context": "Assentamento no Espaço Vazio.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Character",
+      "term_translated": "Personagem",
+      "category": "mecanica",
+      "context": "Personagem do jogador ou NPC. Pode ser 'Caráter' em contexto de história.",
+      "confidence": "medium",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Companions",
+      "term_translated": "Companheiros",
+      "category": "mecanica",
+      "context": "Personagens que acompanham o jogador.",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    },
+    {
+      "term_english": "Encyclopedia",
+      "term_translated": "Enciclopédia",
+      "category": "mecanica",
+      "context": "Referência in-game. Aparece em tags: {g|Encyclopedia:...}...{/g}",
+      "confidence": "high",
+      "usage_count": 1,
+      "created_at": "2025-01-15T00:00:00"
+    }
+  ]
+}

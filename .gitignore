@@ -1,0 +1,35 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+build/
+dist/
+*.spec
+*.egg-info/
+
+# --- Editors / OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# --- App generated state / personal project data ---
+prescan_cache.json
+preserve_map.json
+*.w40k
+*.backup.json
+glossary_pass_temp.json
+mechanics_for_full.json
+delta_*.json
+
+# --- Game data (copyrighted Owlcat files - NEVER commit) ---
+data/en/*.json
+data/pt/
+data/blacklists/blacklist_candidates.*
+
+# --- Old local archive (kept locally, not in git) ---
+archive/
