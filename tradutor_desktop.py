@@ -2014,9 +2014,9 @@ class W40kTranslatorGUI(QMainWindow):
         dlg.setWindowTitle("Live / Manual Wiki Scrape")
         lay = QVBoxLayout(dlg)
 
-        info = QLabel("The original wiki_sync was an offline scrape (hardcoded lists in wiki_sync.py for 2694 terms).\n\n"
-                      "Use this for on-demand / manual addition from the live site when needed.\n"
-                      "Note: Live web scraping can be fragile and should respect the site's robots.txt. Prefer the offline data + manual curation for robustness.")
+        info = QLabel("Search the live WH40K Rogue Trader Wiki (roguetrader.wh40k.wiki) via its\n"
+                      "official MediaWiki API and add the found page to your glossary as a preserve term.\n\n"
+                      "For bulk seeding prefer 'Wiki Sync (offline data)'; use this for individual new terms.")
         info.setWordWrap(True)
         lay.addWidget(info)
 
@@ -2027,7 +2027,7 @@ class W40kTranslatorGUI(QMainWindow):
         form.addWidget(term_edit)
         lay.addLayout(form)
 
-        btn_fetch = QPushButton("Try Live Fetch + Add to Current Glossary (experimental)")
+        btn_fetch = QPushButton("Search Live Wiki + Add to Current Glossary")
         def do_fetch():
             term = term_edit.text().strip()
             if not term:
@@ -2036,37 +2036,85 @@ class W40kTranslatorGUI(QMainWindow):
             if not glossary:
                 QMessageBox.warning(dlg, "No glossary", "Specify a glossary file first.")
                 return
-            self._append_log(f"Live wiki request for '{term}' (manual scrapper mode).")
-            # Simple implementation using stdlib (no new deps). For real robustness we can add requests+bs4 later.
+            self._append_log(f"Live wiki search for '{term}' via MediaWiki API...")
             try:
-                import urllib.request, urllib.parse, re
-                # Very basic: search the known wiki or construct a guess URL. For demo we just log and add a placeholder with preserve.
-                # Real version would fetch https://roguetrader.wh40k.wiki/ and parse lists.
-                self._append_log("  (Live fetch is experimental — adding as preserve term with context 'live wiki')")
-                # For now, just add the term as preserve (user can edit)
+                import urllib.request, urllib.parse
+
+                API = "https://roguetrader.wh40k.wiki/api.php"
+                UA = {"User-Agent": "W40kTradutor/1.0 (fan translation tool; github.com/ltsuemitsu/w40k-tradutor)"}
+
+                def wiki_api(params):
+                    url = API + "?" + urllib.parse.urlencode(dict(params, format="json"))
+                    req = urllib.request.Request(url, headers=UA)
+                    with urllib.request.urlopen(req, timeout=15) as r:
+                        return json.load(r)
+
+                # 1) search for the best matching page
+                s = wiki_api({"action": "query", "list": "search", "srsearch": term, "srlimit": "1"})
+                hits = s.get("query", {}).get("search", [])
+                if not hits:
+                    self._append_log(f"  No wiki results for '{term}'.")
+                    QMessageBox.information(dlg, "Not found", f"No wiki page found for '{term}'.")
+                    return
+                title = hits[0]["title"]
+
+                # 2) fetch page wikitext (follows redirects)
+                w = wiki_api({"action": "query", "prop": "revisions", "rvprop": "content",
+                              "rvslots": "main", "titles": title, "redirects": "1"})
+                page = next(iter(w.get("query", {}).get("pages", {}).values()))
+                if "missing" in page or "revisions" not in page:
+                    raise RuntimeError(f"page '{title}' has no content")
+                resolved = page.get("title", title)
+                wikitext = page["revisions"][0]["slots"]["main"]["*"]
+
+                # 3) light parsing: infobox template name + a few descriptive fields
+                m = re.search(r"\{\{\s*([A-Za-z][A-Za-z0-9 _-]*)", wikitext)
+                template = m.group(1).strip() if m else ""
+                fields = dict(re.findall(r"\n\|([A-Za-z0-9_]+)=([^\n|]*)", wikitext))
+                interesting = [f"{k}={fields[k].strip()}" for k in
+                               ("type", "family", "category", "rarity", "cargo_type")
+                               if fields.get(k) and fields[k].strip()]
+                page_url = "https://roguetrader.wh40k.wiki/wiki/" + urllib.parse.quote(resolved.replace(" ", "_"))
+
+                cat_map = {"weapon": "weapon", "talent": "talent", "ability": "ability",
+                           "skill": "skill", "homeworld": "homeworld", "archetype": "archetype",
+                           "armour": "armour", "consumable": "consumable"}
+                category = cat_map.get(template.lower(), "wiki_live")
+                context = f"WH40K Wiki — {template or 'page'}"
+                if interesting:
+                    context += ": " + ", ".join(interesting[:4])
+                context += f" ({page_url})"
+
+                # 4) add to glossary (skip duplicates)
                 data = {"terms": []}
                 if os.path.exists(glossary):
                     with open(glossary, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                new_term = {
-                    "term_english": term,
-                    "term_translated": term,
-                    "category": "wiki_live",
+                existing = {t.get("term_english", "").strip().lower() for t in data.get("terms", [])}
+                if resolved.lower() in existing:
+                    self._append_log(f"  '{resolved}' already in glossary — skipped.")
+                    QMessageBox.information(dlg, "Already there", f"'{resolved}' is already in the glossary.")
+                    return
+                data.setdefault("terms", []).append({
+                    "term_english": resolved,
+                    "term_translated": resolved,
+                    "category": category,
                     "preserve": True,
                     "source": "live_wiki",
-                    "context": "Manually scraped / requested from wiki",
-                    "confidence": "medium"
-                }
-                data.setdefault("terms", []).append(new_term)
+                    "context": context,
+                    "confidence": "medium",
+                    "usage_count": 1,
+                    "created_at": datetime.now().isoformat(),
+                })
                 with open(glossary, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
-                self._append_log(f"  Added '{term}' to glossary as preserve term (live/manual). Reload the glossary tab.")
+                self._append_log(f"  Added '{resolved}' [{category}] from live wiki: {context}")
                 self._load_glossary_into_table()
-                QMessageBox.information(dlg, "Added", f"'{term}' added with preserve=true. Edit as needed.")
+                QMessageBox.information(dlg, "Added", f"'{resolved}' added from the live wiki.\n\n{context}")
                 dlg.accept()
             except Exception as ex:
-                self._append_log(f"  Live fetch error (will fallback to manual): {ex}")
-                QMessageBox.warning(dlg, "Fetch issue", f"Could not fetch live. You can add '{term}' manually in the table with preserve checked.\n\nError: {ex}")
+                self._append_log(f"  Live fetch error (add manually if needed): {ex}")
+                QMessageBox.warning(dlg, "Fetch issue", f"Could not fetch '{term}' from the live wiki. You can add it manually in the table with preserve checked.\n\nError: {ex}")
         btn_fetch.clicked.connect(do_fetch)
         lay.addWidget(btn_fetch)
 
