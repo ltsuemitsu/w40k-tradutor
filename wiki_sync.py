@@ -2836,7 +2836,7 @@ def sync_glossary(glossary_path: str, review: bool = False,
         print(f"\n{len(candidates)} novos termos da wiki para adicionar:\n")
         approved = []
         for c in candidates:
-            print(f'  "{c['term_english']}" [{c['category']}]')
+            print(f'  "{c["term_english"]}" [{c["category"]}]')
             resp = input("  Adicionar? [Y/n/q]: ").strip().lower()
             if resp == 'q':
                 break
