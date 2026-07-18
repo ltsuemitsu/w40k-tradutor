@@ -2187,13 +2187,20 @@ class W40kTranslatorGUI(QMainWindow):
             QMessageBox.critical(self, "Load failed", str(e))
             return
 
+        def is_wiki_term(t):
+            # wiki_sync.py writes source="wh40k_wiki"; older terms may use
+            # "WH40K Wiki ...". Normalize case and separators so the clean can
+            # never silently wipe the whole glossary again. (Fixes #2)
+            src = (t.get("source") or "").lower().replace("-", "_").replace(" ", "_")
+            return src.startswith("wh40k")
+
         if "ONLY official wiki" in choice:
-            new_terms = [t for t in all_terms if t.get("source", "").startswith("WH40K Wiki")]
+            new_terms = [t for t in all_terms if is_wiki_term(t)]
             action = "kept only official wiki terms"
         elif "user-added and low" in choice:
             new_terms = [
                 t for t in all_terms
-                if t.get("source", "").startswith("WH40K Wiki") or t.get("confidence") == "high"
+                if is_wiki_term(t) or t.get("confidence") == "high"
             ]
             action = "removed most user-added / low-confidence terms"
         else:
@@ -3099,21 +3106,12 @@ class W40kTranslatorGUI(QMainWindow):
             return
 
         try:
-            # We *completely avoid* any live widget accesses during save.
-            # This prevents the "QLineEdit already deleted" RuntimeError.
-            # We save from the reliable in-memory self.current_project (last good state)
-            # and only update the path.
-            if self.current_project:
-                state = dict(self.current_project)
-            else:
-                # First ever save: minimal state, no widget touch
-                state = {
-                    "version": "1.0",
-                    "saved_at": datetime.now().isoformat(),
-                    "translate": {"preserve": True},
-                    "glossary": "",
-                }
-
+            # Collect the CURRENT UI state. _collect_current_state() wraps every
+            # widget access in try/except RuntimeError and falls back to the last
+            # known in-memory state, so this is safe even if a widget's C++
+            # object was deleted. (Fixes #1: saving used to write the stale
+            # last-loaded state, losing all current UI edits.)
+            state = self._collect_current_state()
             state["project_path"] = path
 
             with open(path, "w", encoding="utf-8") as f:
