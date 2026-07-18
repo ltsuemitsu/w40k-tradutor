@@ -1,5 +1,7 @@
 # W40K Rogue Trader Translator (EN → PT-BR)
 
+![tests](https://github.com/ltsuemitsu/w40k-tradutor/actions/workflows/tests.yml/badge.svg)
+
 A fan-made toolkit to translate *Warhammer 40,000: Rogue Trader* (Owlcat Games)
 localization files from English to Brazilian Portuguese, using LLM APIs
 (DeepSeek by default; also Zhipu GLM or any OpenAI-compatible endpoint).
@@ -125,6 +127,19 @@ See `README_v3.md` (PT-BR) and `SCENARIOS.md` for the full workflows.
 Tracked in `GUI_ROADMAP.md`. Highlights: direct function integration in the
 GUI (replacing subprocess calls), interactive string reviewer, secure key
 storage via `keyring`, PyInstaller packaging, cost dashboard, tests.
+
+## Development
+
+Run the test suite (stdlib `unittest` only — no pytest needed):
+
+```bash
+pip install openai tqdm
+python -m unittest discover -s tests -v
+```
+
+Tests use tiny synthetic fixtures — no network, no API keys, no LLM calls.
+CI runs a compile-all syntax gate plus the suite on Ubuntu and Windows ×
+Python 3.10/3.12 (see `.github/workflows/tests.yml`).
 
 ## Contributing
 
