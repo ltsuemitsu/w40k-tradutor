@@ -52,7 +52,7 @@ class GlossaryEntry:
     
     def display(self, index: int = 0) -> str:
         lines = [
-            f"  [{index}] \"{self.term_english}\" → \"{self.term_traduzido}\"",
+            f"  [{index}] \"{self.term_english}\" → \"{self.term_translated}\"",
             f"      Categoria: {self.category} | Confiança: {self.confidence} | Usos: {self.usage_count}",
         ]
         if self.context:

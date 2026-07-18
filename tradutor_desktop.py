@@ -282,7 +282,8 @@ class W40kTranslatorGUI(QMainWindow):
         # Debounced auto-save for manual glossary table edits
         self._glossary_save_timer = QTimer(self)
         self._glossary_save_timer.setSingleShot(True)
-        self._glossary_save_timer.timeout.connect(self._save_glossary_from_table)
+        # Auto-saves run silently (no modal popup); manual saves still get one. (#5)
+        self._glossary_save_timer.timeout.connect(lambda: self._save_glossary_from_table(silent=True))
 
         # Try to restore the user's previous window size/position first.
         # This respects what they resized it to on *their* screen.
@@ -1570,21 +1571,27 @@ class W40kTranslatorGUI(QMainWindow):
             terms = data.get("terms", [])
             self.glossary_table.setRowCount(0)
 
-            for term in terms:
-                row = self.glossary_table.rowCount()
-                self.glossary_table.insertRow(row)
+            # Block itemChanged while (re)loading: programmatic inserts are not
+            # user edits and must not arm the auto-save debounce. (Fixes #5)
+            self.glossary_table.blockSignals(True)
+            try:
+                for term in terms:
+                    row = self.glossary_table.rowCount()
+                    self.glossary_table.insertRow(row)
 
-                self.glossary_table.setItem(row, 0, QTableWidgetItem(term.get("term_english", "")))
-                self.glossary_table.setItem(row, 1, QTableWidgetItem(term.get("term_translated", "")))
-                self.glossary_table.setItem(row, 2, QTableWidgetItem(term.get("category", "")))
+                    self.glossary_table.setItem(row, 0, QTableWidgetItem(term.get("term_english", "")))
+                    self.glossary_table.setItem(row, 1, QTableWidgetItem(term.get("term_translated", "")))
+                    self.glossary_table.setItem(row, 2, QTableWidgetItem(term.get("category", "")))
 
-                # Preserve checkbox column
-                preserve_item = QTableWidgetItem()
-                preserve_item.setCheckState(Qt.Checked if term.get("preserve") else Qt.Unchecked)
-                self.glossary_table.setItem(row, 3, preserve_item)
+                    # Preserve checkbox column
+                    preserve_item = QTableWidgetItem()
+                    preserve_item.setCheckState(Qt.Checked if term.get("preserve") else Qt.Unchecked)
+                    self.glossary_table.setItem(row, 3, preserve_item)
 
-                self.glossary_table.setItem(row, 4, QTableWidgetItem(term.get("source", "")))
-                self.glossary_table.setItem(row, 5, QTableWidgetItem(term.get("context", "")))
+                    self.glossary_table.setItem(row, 4, QTableWidgetItem(term.get("source", "")))
+                    self.glossary_table.setItem(row, 5, QTableWidgetItem(term.get("context", "")))
+            finally:
+                self.glossary_table.blockSignals(False)
 
             self._append_log(f"Loaded {len(terms)} terms from glossary.")
             self._update_status(f"Glossary: {len(terms)} terms")
@@ -1592,7 +1599,7 @@ class W40kTranslatorGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Failed to load glossary", str(e))
 
-    def _save_glossary_from_table(self):
+    def _save_glossary_from_table(self, silent: bool = False):
         path = self.glossary_path_edit.text().strip()
         if not path:
             path, _ = QFileDialog.getSaveFileName(self, "Save Glossary", "glossary.json", "JSON (*.json)")
@@ -1656,7 +1663,11 @@ class W40kTranslatorGUI(QMainWindow):
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
             self._append_log(f"Saved glossary with {len(terms)} terms → {path}")
-            QMessageBox.information(self, "Saved", f"Glossary saved with {len(terms)} terms.")
+            if silent:
+                # Debounced auto-save: status bar only, no modal popup. (#5)
+                self._update_status(f"Glossary auto-saved ({len(terms)} terms)")
+            else:
+                QMessageBox.information(self, "Saved", f"Glossary saved with {len(terms)} terms.")
         except Exception as e:
             QMessageBox.critical(self, "Save failed", str(e))
 
@@ -1744,11 +1755,13 @@ class W40kTranslatorGUI(QMainWindow):
                 return
 
             model = self.model_edit.currentText().strip()
+            wiki_batch = 30  # must match the WikiTranslateWorker batch_size below (#7)
+            n_calls = (len(to_translate) + wiki_batch - 1) // wiki_batch
             reply = QMessageBox.question(
                 self, "Translate Wiki Terms",
                 f"Found {len(to_translate)} wiki/preserve terms without Portuguese translation.\n\n"
-                f"This will send {len(to_translate)} terms to the LLM in batches of 6\n"
-                f"({len(to_translate) // 6 + 1} API calls) using model: {model}.\n\n"
+                f"This will send {len(to_translate)} terms to the LLM in batches of {wiki_batch}\n"
+                f"({n_calls} API calls, up to 3 in parallel) using model: {model}.\n\n"
                 f"ESTIMATED COST: ${round(len(to_translate) * 0.001, 2)}–${round(len(to_translate) * 0.005, 2)} USD\n"
                 f"(depends on model pricing; flash models are much cheaper)\n\n"
                 f"TIP: ALL {len(to_translate)} terms will be translated to Portuguese.\n"
@@ -1770,7 +1783,7 @@ class W40kTranslatorGUI(QMainWindow):
             model = self.model_edit.currentText().strip()
             base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
             self._append_log(f"[WIKI-TRANSLATE] Using model='{model}'  (detailed raw LLM responses + truncation detection will be logged)")
-            self._wiki_worker = WikiTranslateWorker(to_translate, model, key, provider, base_url)
+            self._wiki_worker = WikiTranslateWorker(to_translate, model, key, provider, base_url, batch_size=wiki_batch)
             worker = self._wiki_worker
             worker.log.connect(self._append_log)
             worker.progress.connect(lambda cur, tot, msg: self.progress.setValue(int(cur / max(tot, 1) * 100)))
@@ -3732,6 +3745,7 @@ class TranslationWorker(QThread):
 
             total_items_estimate = 0
             processed = 0
+            final_counts = None  # parsed from tradutor.py's summary line (#6)
             for line in iter(self._proc.stdout.readline, ''):
                 if self._cancel_requested:
                     self._proc.terminate()
@@ -3762,6 +3776,17 @@ class TranslationWorker(QThread):
                         except Exception:
                             pass
 
+                    # Capture tradutor.py's final summary, e.g.:
+                    # "✅ Concluído: 1234 traduzidos | 5 falhas | 678 preservados" (#6)
+                    if "Concluído:" in line:
+                        nums = re.findall(r"\d+", line)
+                        if len(nums) >= 3:
+                            final_counts = {
+                                "translated": int(nums[0]),
+                                "failed": int(nums[1]),
+                                "preserved": int(nums[2]),
+                            }
+
                     # Detect when glossary extraction happened
                     if "extract" in line.lower() or "glossary" in line.lower():
                         self.signals.log.emit("[GLOSSARY] Term extraction activity detected.")
@@ -3769,14 +3794,18 @@ class TranslationWorker(QThread):
             self._proc.stdout.close()
             exit_code = self._proc.wait()
 
-            # Final stats guess (real numbers are in the log from tradutor)
-            preserved = 600 if self.preserve else 5
-            self.signals.stats.emit({
+            # Report only real numbers: counts parsed from tradutor.py's own
+            # summary line; anything else stays "see log" — no invented stats. (#6)
+            run_stats = {
                 "tokens": "see final log lines",
                 "cost_usd": "see final log lines",
-                "preserved": preserved,
-                "extracted_terms": "see log if --extract-every was used"
-            })
+                "preserved": final_counts.get("preserved", "see log") if final_counts else "see log",
+                "extracted_terms": "see log if --extract-every was used",
+            }
+            if final_counts:
+                run_stats["translated"] = final_counts["translated"]
+                run_stats["failed"] = final_counts["failed"]
+            self.signals.stats.emit(run_stats)
 
             if exit_code == 0:
                 msg = "Translation completed successfully (batches + parallel workers from tradutor.py)."
