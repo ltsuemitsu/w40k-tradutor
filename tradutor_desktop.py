@@ -27,6 +27,17 @@ import threading
 import shutil
 import traceback
 from pathlib import Path
+
+# Optional: OS keychain storage for API keys (issue #9). If keyring is not
+# installed, the app falls back to QSettings with a logged warning.
+try:
+    import keyring as _keyring
+    _KEYRING_AVAILABLE = True
+except ImportError:
+    _keyring = None
+    _KEYRING_AVAILABLE = False
+
+_KEYRING_SERVICE = "W40kTradutor"
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
@@ -661,8 +672,8 @@ class W40kTranslatorGUI(QMainWindow):
         self.api_key_edit.textChanged.connect(self._on_api_key_changed)
         pl.addWidget(self.api_key_edit, 1)
 
-        save_key_cb = QCheckBox("Save locally")
-        save_key_cb.setToolTip("Saves the key in local app settings (QSettings). Only on your PC, not sent anywhere. You can clear it by unchecking.")
+        save_key_cb = QCheckBox("Save securely (OS keychain)")
+        save_key_cb.setToolTip("Stores the key in your operating system's secure keychain (Windows Credential Manager) via keyring. Never sent anywhere. Uncheck to remove it. If keyring is not installed, falls back to plain app settings (not recommended).")
         save_key_cb.stateChanged.connect(self._on_save_key_toggled)
         pl.addWidget(save_key_cb)
         self.save_key_cb = save_key_cb
@@ -3255,12 +3266,62 @@ class W40kTranslatorGUI(QMainWindow):
             pass
 
     def _settings_key_for_provider(self, provider_text: str) -> str:
-        """Return the QSettings key used to store the API key for a provider."""
+        """Return the storage key name used for a provider's API key."""
         if "GLM" in provider_text or "Zhipu" in provider_text:
             return "api_key_zhipu"
         elif "Custom" in provider_text:
             return "api_key_custom"
         return "api_key_deepseek"
+
+    # ── Secure API-key storage (issue #9) ──────────────────────────────
+    def _key_store_set(self, key_name: str, value: str) -> bool:
+        """Store an API key. Prefers the OS keychain via keyring; falls back
+        to QSettings (plaintext) only if the keychain is unavailable.
+        Returns True when the secure keychain was used."""
+        if _KEYRING_AVAILABLE:
+            try:
+                _keyring.set_password(_KEYRING_SERVICE, key_name, value)
+                self.settings.remove(key_name)  # drop any legacy plaintext copy
+                return True
+            except Exception as e:
+                self._append_log(f"[WARN] OS keychain unavailable ({e}); key stored in plain app settings.")
+        self.settings.setValue(key_name, value)
+        return False
+
+    def _key_store_get(self, key_name: str) -> str:
+        """Read an API key: OS keychain first, legacy QSettings as fallback.
+        Migrates legacy plaintext keys into the keychain on first read."""
+        legacy = self.settings.value(key_name, "") or ""
+        if _KEYRING_AVAILABLE:
+            try:
+                val = _keyring.get_password(_KEYRING_SERVICE, key_name)
+            except Exception:
+                val = None
+            if val:
+                return val
+            if legacy:
+                try:
+                    _keyring.set_password(_KEYRING_SERVICE, key_name, legacy)
+                    self.settings.remove(key_name)
+                    self._append_log("🔐 API key migrated to the OS keychain (was stored unencrypted).")
+                except Exception:
+                    pass  # keep the legacy copy; the app keeps working
+        return legacy
+
+    def _key_store_delete(self, key_name: str):
+        """Remove an API key from both the keychain and legacy QSettings."""
+        if _KEYRING_AVAILABLE:
+            try:
+                _keyring.delete_password(_KEYRING_SERVICE, key_name)
+            except Exception:
+                pass
+        self.settings.remove(key_name)
+
+    def _save_key_if_checked(self):
+        """Persist the current key when the user opted to save (called before
+        runs). Called by the wiki-sync flow; previously missing entirely."""
+        if self.save_key_cb.isChecked():
+            self._on_save_key_toggled(Qt.Checked)
 
     def _load_saved_key_for_current_provider(self):
         """Load any previously saved API key for the active provider.
@@ -3271,7 +3332,7 @@ class W40kTranslatorGUI(QMainWindow):
         """
         provider = self.provider_combo.currentText()
         key_name = self._settings_key_for_provider(provider)
-        saved = self.settings.value(key_name, "")
+        saved = self._key_store_get(key_name)
         current = self.api_key_edit.text().strip()
 
         if saved:
@@ -3316,9 +3377,9 @@ class W40kTranslatorGUI(QMainWindow):
             key_name = self._settings_key_for_provider(provider)
             key = text.strip()
             if key:
-                self.settings.setValue(key_name, key)
+                self._key_store_set(key_name, key)
             else:
-                self.settings.remove(key_name)
+                self._key_store_delete(key_name)
 
     def _on_save_key_toggled(self, state: int):
         """Persist or remove the current API key for the active provider."""
@@ -3327,10 +3388,11 @@ class W40kTranslatorGUI(QMainWindow):
         if state == Qt.Checked:
             key = self.api_key_edit.text().strip()
             if key:
-                self.settings.setValue(key_name, key)
-                self._append_log(f"API key saved locally for {provider.split('(')[0].strip()}")
+                secure = self._key_store_set(key_name, key)
+                where = "OS keychain" if secure else "plain app settings (keyring unavailable)"
+                self._append_log(f"API key saved for {provider.split('(')[0].strip()} → {where}")
         else:
-            self.settings.remove(key_name)
+            self._key_store_delete(key_name)
             self._append_log(f"API key removed from local storage for {provider.split('(')[0].strip()}")
 
     def _open_provider_dialog(self):
@@ -3338,10 +3400,11 @@ class W40kTranslatorGUI(QMainWindow):
             self,
             "Providers & Keys",
             "Provider selection is available directly in the Translate tab.\n\n"
-            "For persistent keys it is recommended to set environment variables:\n"
+            "Keys can be stored securely in your OS keychain (Windows Credential\n"
+            "Manager) by ticking 'Save securely' next to the key field.\n\n"
+            "Alternatively, set environment variables:\n"
             "  • DEEPSEEK_API_KEY\n"
-            "  • DEEPSEEK_BASE_URL (optional, for GLM use https://open.bigmodel.cn/api/paas/v4)\n\n"
-            "Future versions will offer secure local storage for multiple named providers."
+            "  • DEEPSEEK_BASE_URL (optional, for GLM use https://open.bigmodel.cn/api/paas/v4)"
         )
 
     def closeEvent(self, event):
