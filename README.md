@@ -42,22 +42,18 @@ desktop GUI ("Grimdark Edition").
 | `diff_tool.py` | Audit translations, diff game patches, smart glossary-aware diff |
 | `merge.py` | Merge correction/retranslation files into the main output (backup + dry-run) |
 | `glossary_manager.py` | Interactive CLI glossary editor |
-| `wiki_sync.py` | Glossary seeder: ~2,694 wiki terms in 16 categories |
+| `wiki_sync.py` | Glossary seeder (loads offline wiki term lists) |
+| `data/glossaries/wiki_terms.json` | Offline wiki terms (~2,694 in 16 categories) |
 | `glossary.json` | Community glossary (~2,694 terms, EN→PT-BR) — ready to use |
 | `data/glossaries/glossary_seed.json` | Hand-written seed terms |
 | `launch_gui.bat` / `launch_gui.ps1` | Windows launchers (auto-setup venv + deps) |
 | `SCENARIOS.md` | Design contract: the 4 core workflows |
-| `GUI_ROADMAP.md` | GUI status & development roadmap |
-| `README_v3.md` | Original v3.0 user manual (PT-BR) |
 
 ## Requirements
 
-- Python **3.12+** (recommended; see note below)
-- `pip install -r requirements-gui.txt` (`openai`, `tqdm`, `PySide6`)
+- Python **3.10+** (3.12 tested in CI)
+- `pip install -r requirements-gui.txt` (`openai`, `tqdm`, `PySide6`, `keyring`)
 - An API key for DeepSeek (default) or another OpenAI-compatible provider
-
-> Note: `wiki_sync.py` currently uses f-string syntax that requires Python
-> ≥ 3.12. The CLIs `tradutor.py`, `diff_tool.py`, `merge.py` run on 3.10+.
 
 ## Configuration
 
@@ -70,9 +66,9 @@ export DEEPSEEK_API_KEY=sk-...       # Linux/macOS
 set DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-The GUI also lets you paste keys per-provider in the Settings dialog. (Note:
-"Save locally" currently stores keys unencrypted via QSettings — use env vars
-if you prefer.)
+The GUI also lets you paste keys per-provider in Settings. Prefer **Save to
+keychain** (OS Credential Manager via `keyring`); falls back to plain
+QSettings only if `keyring` is missing.
 
 ## Quick start
 
@@ -120,13 +116,7 @@ python merge.py data/pt/ptBR.json data/pt/ptBR_patch.json
 python diff_tool.py audit data/en/enGB.json data/pt/ptBR.json
 ```
 
-See `README_v3.md` (PT-BR) and `SCENARIOS.md` for the full workflows.
-
-## Roadmap
-
-Tracked in `GUI_ROADMAP.md`. Highlights: direct function integration in the
-GUI (replacing subprocess calls), interactive string reviewer, secure key
-storage via `keyring`, PyInstaller packaging, cost dashboard, tests.
+See `SCENARIOS.md` for the four core workflows.
 
 ## Development
 

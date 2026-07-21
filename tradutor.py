@@ -14,7 +14,7 @@ Cenários:
 Modos de Preservação:
   --mode complete     → Traduz tudo (100% português)
   --mode preserve     → Preserva termos do glossário marcados como "preservar"
-  --preserve-cats     → Quais categorias preservar (default: weapon,talent,skill,ability,attribute)
+  --preserve-cats     → Quais categorias preservar (default: ver DEFAULT_PRESERVE_CATS)
 
 Uso:
     # Primeira vez — do zero
@@ -65,6 +65,15 @@ DEFAULT_TEMPERATURE = 0.15
 DEFAULT_TARGET_LANGUAGE = "Português do Brasil"
 MAX_TOKENS_PER_BATCH = 12500
 
+# Single source of truth for --mode preserve category filter (GUI + CLI).
+# Matches wiki_sync categories + attribute/lore/skill used by the game glossary.
+DEFAULT_PRESERVE_CATS = (
+    "weapon", "talent", "skill", "ability", "attribute", "lore",
+    "armour", "helmet", "consumable", "necklace", "gloves", "cloak", "boots",
+    "pet_protocol", "conviction", "archetype", "homeworld", "origin", "accessory",
+)
+DEFAULT_PRESERVE_CATS_CSV = ",".join(DEFAULT_PRESERVE_CATS)
+
 SKIP_TEXTS = {"placeholder","tbd","todo","n/a","wip","dummy","test","temp","temporary","stub","none","null","blank","empty","missing","notext","no text","new text","string","template","sample text","lorem ipsum","fixme","fix me","deprecated","obsolete","removed","deleted","hidden","unused","reserved","...","[placeholder]","{placeholder}","<placeholder>","(placeholder)",}
 
 SYSTEM_PROMPT = """Você é tradutor sênior de jogos Warhammer 40K: Rogue Trader. Traduza do inglês para {lang}.
@@ -89,7 +98,7 @@ class SmartGlossary:
                  preserve_cats: Set[str] = None):
         self.path = path
         self.preserve_mode = preserve_mode  # "complete" ou "preserve"
-        self.preserve_cats = preserve_cats or {"weapon","talent","skill","ability","attribute","lore"}
+        self.preserve_cats = preserve_cats or set(DEFAULT_PRESERVE_CATS)
         self.entries: Dict[str, dict] = {}  # key=term_english.lower()
         self._preserve_index: Set[str] = set()  # pre-computed lowercase keys for O(1) lookup
         self._preserve_terms_list: List[str] = []  # sorted by length desc for contains matching
@@ -583,7 +592,7 @@ def main():
     parser.add_argument("-g","--glossary", help="Glossário JSON")
     parser.add_argument("--mode", choices=["complete","preserve"], default="complete",
                         help="complete=traduz tudo | preserve=preserva mecânicas")
-    parser.add_argument("--preserve-cats", default="weapon,talent,skill,ability,attribute,lore",
+    parser.add_argument("--preserve-cats", default=DEFAULT_PRESERVE_CATS_CSV,
                         help="Categorias do glossário a preservar (modo preserve)")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("-b","--batch-size", type=int, default=DEFAULT_BATCH_SIZE)

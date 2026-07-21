@@ -61,7 +61,7 @@ try:
         QMessageBox, QMenuBar, QStatusBar, QSplitter, QFrame, QInputDialog,
         QDialog
     )
-    from PySide6.QtCore import Qt, QProcess, QSettings, Signal, QObject, QThread, QTimer
+    from PySide6.QtCore import Qt, QSettings, Signal, QObject, QThread, QTimer
     from PySide6.QtGui import QFont, QColor, QPalette, QAction
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -235,41 +235,6 @@ QTextEdit#log {
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HELPER: Simple worker for threading long operations (optional, we use QProcess mostly)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class ProcessWorker(QObject):
-    output = Signal(str)
-    finished = Signal(int)
-    progress = Signal(int)
-
-    def __init__(self, cmd: List[str]):
-        super().__init__()
-        self.cmd = cmd
-        self.process: Optional[QProcess] = None
-
-    def run(self):
-        self.process = QProcess()
-        self.process.setProcessChannelMode(QProcess.MergedChannels)
-        self.process.readyReadStandardOutput.connect(self._read_output)
-        self.process.finished.connect(self._on_finished)
-        self.process.start(self.cmd[0], self.cmd[1:])
-
-    def _read_output(self):
-        if self.process:
-            data = self.process.readAllStandardOutput().data().decode("utf-8", errors="replace")
-            for line in data.splitlines():
-                self.output.emit(line)
-
-    def _on_finished(self, exit_code):
-        self.finished.emit(exit_code)
-
-    def cancel(self):
-        if self.process:
-            self.process.kill()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # MAIN WINDOW
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -282,7 +247,6 @@ class W40kTranslatorGUI(QMainWindow):
         self.settings = QSettings("W40kTradutor", "DesktopApp")
         self.current_project: Dict[str, Any] = {}
         self.current_project_path: Optional[str] = None
-        self.active_process: Optional[QProcess] = None
         self.active_worker: Optional[TranslationWorker] = None
         self.recent_projects: List[str] = []
 
@@ -1158,10 +1122,8 @@ class W40kTranslatorGUI(QMainWindow):
                     glossary = None
                     if self.glossary_available:
                         try:
-                            from tradutor import SmartGlossary
-                            preserve_cats = {"weapon","talent","skill","ability","attribute","lore",
-                                            "armour","helmet","consumable","necklace","gloves","cloak",
-                                            "boots","pet_protocol","conviction","archetype","homeworld","origin"}
+                            from tradutor import SmartGlossary, DEFAULT_PRESERVE_CATS
+                            preserve_cats = set(DEFAULT_PRESERVE_CATS)
                             glossary = SmartGlossary(self.glossary_path, "preserve", preserve_cats)
                         except Exception:
                             pass
@@ -1932,7 +1894,7 @@ class W40kTranslatorGUI(QMainWindow):
                 else:
                     env["DEEPSEEK_BASE_URL"] = env.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
             self._run_external(cmd, "Wiki Sync (official terms)", custom_env=env if key else None)
-            # Chaining happens in _on_process_finished
+            # Chaining → AI extraction happens in _on_worker_finished
         else:
             reply2 = QMessageBox.question(
                 self, "AI Term Extraction — COSTS REAL MONEY",
@@ -2005,8 +1967,7 @@ class W40kTranslatorGUI(QMainWindow):
                 env["DEEPSEEK_BASE_URL"] = env.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
         self._run_external(cmd, "AI Glossary Population (term extraction)", custom_env=env if key else None)
-
-        # The final "review the glossary" message is shown in _on_process_finished when this task completes.
+        # Completion dialog is shown in _on_worker_finished.
 
     def _live_wiki_scrape_dialog(self):
         """Manual / on-demand wiki connection (user request for live instead of only offline scrape)."""
@@ -2574,8 +2535,8 @@ class W40kTranslatorGUI(QMainWindow):
             cmd += ["-g", gloss]
 
         if preserve_on:
-            cmd += ["--mode", "preserve", "--preserve-cats",
-                    "weapon,talent,skill,ability,attribute,lore,armour,helmet,consumable,necklace,gloves,cloak,boots,pet_protocol,conviction,archetype,homeworld,origin"]
+            from tradutor import DEFAULT_PRESERVE_CATS_CSV
+            cmd += ["--mode", "preserve", "--preserve-cats", DEFAULT_PRESERVE_CATS_CSV]
         else:
             cmd += ["--mode", "complete"]
 
@@ -2765,81 +2726,43 @@ class W40kTranslatorGUI(QMainWindow):
         self._start_with_worker(cmd, "Second-Pass Translation", env)
 
     def _run_external(self, cmd: List[str], task_name: str, custom_env: Optional[dict] = None):
-        """Run a python script via QProcess and feed output to the log (used for Audit, Merge, Wiki Sync etc.)."""
+        """ponytail: one runner — same TranslationWorker path as translate."""
+        self._start_with_worker(cmd, task_name, custom_env)
+
+    def _start_with_worker(self, cmd: List[str], task_name: str, env: Optional[dict] = None):
+        """Launch any CLI via TranslationWorker (cmd fully built by caller)."""
         self._append_log(f"=== {task_name} started ===")
         self.progress.setValue(0)
         self.cancel_btn.setEnabled(True)
 
-        self.active_process = QProcess()
-        self.active_process.setProcessChannelMode(QProcess.MergedChannels)
-
-        if custom_env:
-            qenv = self.active_process.processEnvironment()
-            for k, v in custom_env.items():
-                qenv.insert(k, str(v))
-            self.active_process.setProcessEnvironment(qenv)
-
-        self.active_process.readyReadStandardOutput.connect(self._on_process_output)
-        self.active_process.finished.connect(lambda code: self._on_process_finished(code, task_name))
-        self.active_process.start(cmd[0], cmd[1:])
-
-    def _start_with_worker(self, cmd: List[str], task_name: str, env: Optional[dict] = None):
-        """Launch translation via the TranslationWorker for better live interactive feedback."""
-        self._append_log(f"=== {task_name} started (via worker) ===")
-        self.progress.setValue(0)
-        self.cancel_btn.setEnabled(True)
-
-        # Pass the already-built command + environment so the worker doesn't
-        # have to reconstruct them. This keeps preserve_map preprocessing,
-        # blacklist, model and provider choices intact.
-        self.active_worker = TranslationWorker(
-            cmd=cmd,
-            env=env,
-            # Keep fallback fields so the worker can still build a command if needed
-            input_path=self.tr_input.text().strip(),
-            output_path=self.tr_output.text().strip(),
-            glossary_path=self.tr_glossary.text().strip() or "",
-            preserve=self.preserve_toggle.isChecked(),
-            provider=self.provider_combo.currentText(),
-            model=self.model_edit.currentText().strip() or "deepseek-v4-pro",
-            batch=self.batch_spin.value(),
-            workers=self.workers_spin.value(),
-            temp=self.temp_spin.value(),
-            dry_run=self.dry_run_cb.isChecked(),
-            api_key=self.api_key_edit.text().strip(),
-            blacklist_path=self.tr_blacklist.text().strip() if hasattr(self, "tr_blacklist") else "",
-            extract_every=5 if (hasattr(self, "auto_extract_cb") and self.auto_extract_cb.isChecked()) else 0,
-        )
+        self.active_worker = TranslationWorker(cmd=cmd, env=env)
         self.active_worker.signals.log.connect(self._append_log)
         self.active_worker.signals.progress.connect(self._on_worker_progress)
         self.active_worker.signals.stats.connect(self._on_worker_stats)
         self.active_worker.signals.finished.connect(lambda ok, msg: self._on_worker_finished(ok, msg, task_name))
         self.active_worker.start()
 
-    def _on_process_output(self):
-        if self.active_process:
-            data = self.active_process.readAllStandardOutput().data().decode("utf-8", errors="replace")
-            for line in data.splitlines():
-                self._append_log(line)
-                # Very rough progress from tqdm style lines
-                if "%" in line and "|" in line:
-                    try:
-                        pct = int(line.split("%")[0].split()[-1])
-                        self.progress.setValue(min(100, max(0, pct)))
-                    except:
-                        pass
+    def _on_worker_progress(self, current: int, total: int, message: str):
+        pct = int((current / max(total, 1)) * 100)
+        self.progress.setValue(pct)
+        self._append_log(f"[progress] {message} ({current}/{total})")
 
-    def _on_process_finished(self, exit_code: int, task_name: str):
-        self._append_log(f"=== {task_name} finished (exit={exit_code}) ===")
-        self.progress.setValue(100 if exit_code == 0 else 50)
+    def _on_worker_stats(self, stats: dict):
+        self._append_log(
+            f"[stats] Tokens: {stats.get('tokens', '?')} | Est. cost: ${stats.get('cost_usd', '?')} | "
+            f"Preserved: {stats.get('preserved', '?')}"
+        )
+
+    def _on_worker_finished(self, success: bool, message: str, task_name: str):
+        self._append_log(f"=== {task_name} finished: {message} ===")
+        self.progress.setValue(100 if success else 60)
         self.cancel_btn.setEnabled(False)
-        self.active_process = None
+        self.active_worker = None
 
-        # Handle chaining for Populate Glossary flow
+        # Populate-glossary chain: wiki sync → AI extraction
         if task_name == "Wiki Sync (official terms)":
-            if exit_code == 0 and self._pending_population_source and self._pending_population_glossary:
+            if success and self._pending_population_source and self._pending_population_glossary:
                 self._append_log("Wiki Sync succeeded. Starting AI extraction step...")
-                # Cost confirmation before auto-chaining (prevents budget surprises)
                 try:
                     with open(self._pending_population_source, "r", encoding="utf-8") as f:
                         sd = json.load(f)
@@ -2847,74 +2770,60 @@ class W40kTranslatorGUI(QMainWindow):
                     est_api_calls = max(1, n // 8 // 20)  # batch_size=8, extract_every=20
                     model_now = self.model_edit.currentText().strip() or "deepseek-v4-pro"
                     confirm_msg = (
-                        f"Wiki Sync done! Now: AI term extraction.\\n\\n"
-                        f"Source: ~{n:,} strings → ~{est_api_calls} extraction API calls.\\n"
-                        f"Model: {model_now}\\n\\n"
-                        f"ESTIMATED COST: ${round(est_api_calls * 0.003, 2)}–${round(est_api_calls * 0.01, 2)} USD\\n\\n"
-                        f"RECOMMENDATION: Use deepseek-v4-flash for this step.\\n\\n"
+                        f"Wiki Sync done! Now: AI term extraction.\n\n"
+                        f"Source: ~{n:,} strings → ~{est_api_calls} extraction API calls.\n"
+                        f"Model: {model_now}\n\n"
+                        f"ESTIMATED COST: ${round(est_api_calls * 0.003, 2)}–${round(est_api_calls * 0.01, 2)} USD\n\n"
+                        f"RECOMMENDATION: Use deepseek-v4-flash for this step.\n\n"
                         f"Continue with AI extraction?"
                     )
-                    reply = QMessageBox.question(self, "Budget Confirmation — AI Extraction", confirm_msg,
-                                                QMessageBox.Yes | QMessageBox.No)
+                    reply = QMessageBox.question(
+                        self, "Budget Confirmation — AI Extraction", confirm_msg,
+                        QMessageBox.Yes | QMessageBox.No,
+                    )
                     if reply != QMessageBox.Yes:
                         self._append_log("AI extraction cancelled by user after wiki sync.")
                         self._pending_population_source = None
                         self._pending_population_glossary = None
+                        self._update_status(f"{task_name} completed successfully.")
                         return
                 except Exception:
                     pass
                 self._start_ai_extraction_step(
                     self._pending_population_source,
-                    self._pending_population_glossary
+                    self._pending_population_glossary,
                 )
                 self._pending_population_source = None
                 self._pending_population_glossary = None
-            elif exit_code != 0:
-                self._append_log("Wiki Sync failed. You can try the 'Wiki Sync (offline data)' button manually and then run population again.")
+            elif not success:
+                self._append_log(
+                    "Wiki Sync failed. Try 'Wiki Sync (offline data)' manually, then run population again."
+                )
                 self._pending_population_source = None
                 self._pending_population_glossary = None
 
         elif task_name == "AI Glossary Population (term extraction)":
-            if exit_code == 0:
-                self._append_log("=== AI Glossary Population (term extraction) finished successfully ===")
+            if success:
                 QMessageBox.information(
                     self, "Glossary Population Complete",
                     "Both steps finished.\n\n"
-                    "Go to the Glossary tab, review the new terms (edit Preserve flags for names/locations/lore if needed),\n"
-                    "then run your normal translation. The glossary will be much stronger."
+                    "Go to the Glossary tab, review the new terms (edit Preserve flags if needed),\n"
+                    "then run your normal translation.",
                 )
             else:
-                self._append_log("=== AI Glossary Population (term extraction) had errors ===")
                 QMessageBox.warning(
                     self, "Population Finished with Errors",
-                    f"The extraction step returned exit code {exit_code}.\n"
-                    "Check the log pane for details from tradutor.py. You may still have partial results in the glossary."
+                    f"{message}\n\nCheck the log. You may still have partial results in the glossary.",
                 )
 
-        # Auto-reload glossary table if an external task touched the glossary file
-        if exit_code == 0 and task_name in ("Wiki Sync (official terms)", "AI Glossary Population (term extraction)", "Wiki Sync"):
+        if success and task_name in (
+            "Wiki Sync (official terms)",
+            "AI Glossary Population (term extraction)",
+            "Wiki Sync",
+        ):
             self._load_glossary_into_table()
             self._append_log("Glossary table reloaded with updated file.")
 
-        if exit_code == 0:
-            self._update_status(f"{task_name} completed successfully.")
-        else:
-            self._update_status(f"{task_name} failed (see log).")
-
-    # Worker signal handlers (for live interactive translation)
-    def _on_worker_progress(self, current: int, total: int, message: str):
-        pct = int((current / max(total, 1)) * 100)
-        self.progress.setValue(pct)
-        self._append_log(f"[progress] {message} ({current}/{total})")
-
-    def _on_worker_stats(self, stats: dict):
-        self._append_log(f"[stats] Tokens: {stats.get('tokens', '?')} | Est. cost: ${stats.get('cost_usd', '?')} | Preserved: {stats.get('preserved', '?')}")
-
-    def _on_worker_finished(self, success: bool, message: str, task_name: str):
-        self._append_log(f"=== {task_name} finished: {message} ===")
-        self.progress.setValue(100 if success else 60)
-        self.cancel_btn.setEnabled(False)
-        self.active_worker = None
         if success:
             self._update_status(f"{task_name} completed successfully.")
         else:
@@ -2922,21 +2831,13 @@ class W40kTranslatorGUI(QMainWindow):
 
     def _cancel_current(self):
         cancelled = False
-        if self.active_process:
-            try:
-                self.active_process.kill()
-                self._append_log("=== Task cancelled by user (process killed) ===")
-            except Exception as e:
-                self._append_log(f"Error killing process: {e}")
-            cancelled = True
         if self.active_worker:
             try:
                 self.active_worker.cancel()
-                self._append_log("=== Cancellation requested for translation worker ===")
+                self._append_log("=== Cancellation requested ===")
             except Exception as e:
                 self._append_log(f"Error cancelling worker: {e}")
             cancelled = True
-        # Handle the separate Wiki Glossary translation worker (Translate Wiki Terms button)
         if hasattr(self, "_wiki_worker") and self._wiki_worker is not None:
             try:
                 if self._wiki_worker.isRunning():
@@ -3469,24 +3370,13 @@ class W40kTranslatorGUI(QMainWindow):
             except Exception:
                 pass
 
-        # Kill any QProcess (wiki_sync, glossary population, audit, merge, etc.)
-        if self.active_process:
-            try:
-                self.active_process.kill()
-                self._append_log("Killed running external process.")
-            except Exception:
-                pass
-
-        # Cancel the main TranslationWorker (which manages a subprocess)
+        # Cancel CLI worker (tradutor / wiki_sync / audit / merge) — wait so subprocess dies
         if self.active_worker:
             try:
                 self.active_worker.cancel()
-                self._append_log("Cancelled main translation worker — waiting for shutdown...")
-                # CRITICAL: wait for the QThread to actually finish, otherwise
-                # the subprocess (tradutor.py) keeps running in the background
-                # after the window closes, burning API budget.
+                self._append_log("Cancelled worker — waiting for shutdown...")
                 if self.active_worker.isRunning():
-                    self.active_worker.wait(5000)  # 5 second timeout
+                    self.active_worker.wait(5000)
                 self.active_worker = None
             except Exception:
                 pass
@@ -3773,91 +3663,28 @@ class WikiTranslateWorker(QThread):
 
 
 class TranslationWorker(QThread):
-    """Background worker for translation.
+    """Run a pre-built tradutor.py command; stream logs/progress; hard-kill on cancel."""
 
-    Currently uses the robust tradutor.py (your previous batch/parallel/skip logic)
-    but wrapped in a QThread so the GUI gets live signals for progress, logs,
-    stats and proper cancellation — much better for huge files (78k+ lines).
-
-    Improvements made:
-    - Full support for blacklist (from the interactive builder)
-    - Support for glossary auto-population during translation (--extract-every)
-    - Better progress parsing from tqdm output
-    - Cleaner stats at the end
-    - Easy to evolve to 100% direct calls later (using SmartGlossary + TranslationEngine directly)
-    """
-    def __init__(self, input_path: str = "", output_path: str = "", glossary_path: str = "",
-                 preserve: bool = False, provider: str = "", model: str = "", batch: int = 10,
-                 workers: int = 3, temp: float = 0.15, dry_run: bool = False, api_key: str = "",
-                 blacklist_path: str = "", extract_every: int = 0,
-                 cmd: Optional[List[str]] = None, env: Optional[dict] = None):
+    def __init__(self, cmd: List[str], env: Optional[dict] = None):
         super().__init__()
         self.signals = TranslationSignals()
-        self.input_path = input_path
-        self.output_path = output_path
-        self.glossary_path = glossary_path
-        self.preserve = preserve
-        self.provider = provider
-        self.model = model
-        self.batch = batch
-        self.workers = workers
-        self.temp = temp
-        self.dry_run = dry_run
-        self.api_key = api_key
-        self.blacklist_path = blacklist_path
-        self.extract_every = extract_every   # 0 = disabled, >0 = auto-extract terms every N batches (great for first population pass)
         self.cmd = cmd
         self.env = env
         self._cancel_requested = False
         self._proc = None
 
     def run(self):
-        self.signals.log.emit("Translation worker started — using robust batch/parallel/skip logic from tradutor.py (your old workflow).")
-        # For huge 78k+ line files we still delegate the heavy lifting (batching, parallel workers, SKIP_TEXTS, blacklist, tag protection, resume)
-        # to the proven tradutor.py while this worker provides live GUI signals.
         try:
-            if self.cmd:
-                # GUI already built the full command + environment (respects preserve_map, blacklist, etc.)
-                cmd = self.cmd
-                env = self.env if self.env is not None else os.environ.copy()
-            else:
-                # Fallback: build command ourselves
-                cmd = [sys.executable, "tradutor.py", "-i", self.input_path, "-o", self.output_path]
-                if self.glossary_path:
-                    cmd += ["-g", self.glossary_path]
-                if self.preserve:
-                    cmd += ["--mode", "preserve", "--preserve-cats",
-                            "weapon,talent,skill,ability,attribute,lore,armour,helmet,consumable,necklace,gloves,cloak,boots,pet_protocol,conviction,archetype,homeworld,origin"]
-                else:
-                    cmd += ["--mode", "complete"]
-                if self.dry_run:
-                    cmd.append("--dry-run")
-                if self.blacklist_path and os.path.exists(self.blacklist_path):
-                    cmd += ["--blacklist", self.blacklist_path]
-                cmd += ["-b", str(self.batch), "-w", str(self.workers), "--temperature", str(self.temp), "--model", self.model]
-
-                if self.extract_every > 0:
-                    cmd += ["--extract-every", str(self.extract_every)]
-                    self.signals.log.emit(f"[GLOSSARY] Auto-extraction enabled every {self.extract_every} batches (good for first-pass population)")
-
-                env = os.environ.copy()
-                if self.api_key:
-                    env["DEEPSEEK_API_KEY"] = self.api_key
-                    env["OPENAI_API_KEY"] = self.api_key
-                if "GLM" in self.provider or "Zhipu" in self.provider:
-                    env["DEEPSEEK_BASE_URL"] = "https://open.bigmodel.cn/api/paas/v4"
-                else:
-                    env["DEEPSEEK_BASE_URL"] = env.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-
+            cmd = self.cmd
+            env = self.env if self.env is not None else os.environ.copy()
             self.signals.log.emit(f"Launching: {' '.join(cmd)}")
 
-            # Use subprocess so we get the real powerful logic (parallel workers, skipping EULA/placeholders via existing code, blacklist, auto-extract)
-            self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env
+            )
 
-            total_items_estimate = 0
-            processed = 0
-            final_counts = None  # parsed from tradutor.py's summary line (#6)
-            for line in iter(self._proc.stdout.readline, ''):
+            final_counts = None
+            for line in iter(self._proc.stdout.readline, ""):
                 if self._cancel_requested:
                     self._proc.terminate()
                     try:
@@ -3867,46 +3694,37 @@ class TranslationWorker(QThread):
                     self.signals.finished.emit(False, "Cancelled by user")
                     return
                 line = line.rstrip()
-                if line:
-                    self.signals.log.emit(line)
+                if not line:
+                    continue
+                self.signals.log.emit(line)
 
-                    # Improved progress parsing (tqdm in tradutor shows items)
-                    if "%" in line and "|" in line:
-                        try:
-                            # Example tradutor tqdm line:  42%|████▏     |  1234/2900 [00:12<00:18,  92.3it/s]
-                            parts = line.split()
-                            for i, p in enumerate(parts):
-                                if "%" in p:
-                                    pct = int(p.replace("%", ""))
-                                    self.signals.progress.emit(pct, 100, "Processing batches...")
-                                if "/" in p and i > 0:
-                                    nums = p.split("/")
-                                    if len(nums) == 2:
-                                        processed = int(nums[0])
-                                        total_items_estimate = int(nums[1])
-                        except Exception:
-                            pass
+                if "%" in line and "|" in line:
+                    try:
+                        parts = line.split()
+                        for i, p in enumerate(parts):
+                            if "%" in p:
+                                pct = int(p.replace("%", ""))
+                                self.signals.progress.emit(pct, 100, "Processing batches...")
+                            if "/" in p and i > 0:
+                                nums = p.split("/")
+                                if len(nums) == 2:
+                                    int(nums[0]); int(nums[1])  # validate only
+                    except Exception:
+                        pass
 
-                    # Capture tradutor.py's final summary, e.g.:
-                    # "✅ Concluído: 1234 traduzidos | 5 falhas | 678 preservados" (#6)
-                    if "Concluído:" in line:
-                        nums = re.findall(r"\d+", line)
-                        if len(nums) >= 3:
-                            final_counts = {
-                                "translated": int(nums[0]),
-                                "failed": int(nums[1]),
-                                "preserved": int(nums[2]),
-                            }
-
-                    # Detect when glossary extraction happened
-                    if "extract" in line.lower() or "glossary" in line.lower():
-                        self.signals.log.emit("[GLOSSARY] Term extraction activity detected.")
+                # e.g. "✅ Concluído: 1234 traduzidos | 5 falhas | 678 preservados"
+                if "Concluído:" in line:
+                    nums = re.findall(r"\d+", line)
+                    if len(nums) >= 3:
+                        final_counts = {
+                            "translated": int(nums[0]),
+                            "failed": int(nums[1]),
+                            "preserved": int(nums[2]),
+                        }
 
             self._proc.stdout.close()
             exit_code = self._proc.wait()
 
-            # Report only real numbers: counts parsed from tradutor.py's own
-            # summary line; anything else stays "see log" — no invented stats. (#6)
             run_stats = {
                 "tokens": "see final log lines",
                 "cost_usd": "see final log lines",
@@ -3919,24 +3737,15 @@ class TranslationWorker(QThread):
             self.signals.stats.emit(run_stats)
 
             if exit_code == 0:
-                msg = "Translation completed successfully (batches + parallel workers from tradutor.py)."
-                if self.extract_every > 0:
-                    msg += " Glossary was also populated during the run."
-                self.signals.finished.emit(True, msg)
+                self.signals.finished.emit(True, "Completed successfully.")
             else:
-                self.signals.finished.emit(False, f"tradutor.py exited with code {exit_code}")
+                self.signals.finished.emit(False, f"Command exited with code {exit_code}")
 
         except Exception as e:
             self.signals.finished.emit(False, f"Worker error: {e}")
 
     def cancel(self):
-        """Cancel the translation: set the flag AND kill the subprocess directly.
-
-        Just setting _cancel_requested is not enough — the flag is only checked
-        between stdout reads, so if tradutor.py is waiting on an API call the
-        cancellation can hang for a long time. Killing the subprocess forces an
-        immediate exit.
-        """
+        """Flag + kill subprocess (flag alone hangs while waiting on API)."""
         self._cancel_requested = True
         if self._proc:
             try:
@@ -3947,7 +3756,6 @@ class TranslationWorker(QThread):
                     self._proc.kill()
                     self._proc.wait(timeout=2)
             except Exception:
-                # Best-effort: try kill as last resort
                 try:
                     self._proc.kill()
                 except Exception:
