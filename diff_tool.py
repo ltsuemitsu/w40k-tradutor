@@ -282,7 +282,7 @@ def print_update_report(result: dict):
     print(f"\n🆕 NOVOS UUIDs: {len(result['new_keys'])}")
     print(f"📝 MODIFICADOS: {len(result['modified_keys'])}")
     print(f"🗑️ REMOVIDOS: {len(result['removed_keys'])}")
-    print(f"✅ INALTERADOS: {len(result['unchanged_keys'])}")
+    print(f"[OK] INALTERADOS: {len(result['unchanged_keys'])}")
 
 
 def print_smart_report(result: dict, needs_work: list):
@@ -328,7 +328,7 @@ def main():
 
     orig = load_json(args.input)
     if not orig:
-        print("❌ Arquivo de entrada inválido"); return 1
+        print("[ERR] Arquivo de entrada inválido"); return 1
     
     glossary = load_json(args.glossary) if args.glossary else None
     trans = load_json(args.translated) if args.translated else None
@@ -392,7 +392,7 @@ def main():
             output_data["strings"][key] = entry
 
     else:
-        print("❌ Modo não reconhecido. Use --audit, --update ou --smart-diff")
+        print("[ERR] Modo não reconhecido. Use --audit, --update ou --smart-diff")
         print("   --audit: precisa de -t (traduzido)")
         print("   --update: precisa de -i_antigo e -t")
         print("   --smart-diff: precisa de -t e -g (glossário)")

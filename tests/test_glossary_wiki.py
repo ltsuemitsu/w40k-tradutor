@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Tests for glossary_manager.py (entry model + load/save) and
-wiki_sync.get_wiki_data() (static wiki term dataset).
+wiki_sync.get_wiki_data() (offline wiki term dataset from JSON).
 
-No network: get_wiki_data() returns module-level constants only.
+No network: get_wiki_data() loads data/glossaries/wiki_terms.json only.
 """
 import json
 import os

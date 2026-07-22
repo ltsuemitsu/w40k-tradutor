@@ -61,7 +61,7 @@ try:
         QMessageBox, QMenuBar, QStatusBar, QSplitter, QFrame, QInputDialog,
         QDialog
     )
-    from PySide6.QtCore import Qt, QProcess, QSettings, Signal, QObject, QThread, QTimer
+    from PySide6.QtCore import Qt, QSettings, Signal, QObject, QThread, QTimer
     from PySide6.QtGui import QFont, QColor, QPalette, QAction
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -235,41 +235,6 @@ QTextEdit#log {
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HELPER: Simple worker for threading long operations (optional, we use QProcess mostly)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class ProcessWorker(QObject):
-    output = Signal(str)
-    finished = Signal(int)
-    progress = Signal(int)
-
-    def __init__(self, cmd: List[str]):
-        super().__init__()
-        self.cmd = cmd
-        self.process: Optional[QProcess] = None
-
-    def run(self):
-        self.process = QProcess()
-        self.process.setProcessChannelMode(QProcess.MergedChannels)
-        self.process.readyReadStandardOutput.connect(self._read_output)
-        self.process.finished.connect(self._on_finished)
-        self.process.start(self.cmd[0], self.cmd[1:])
-
-    def _read_output(self):
-        if self.process:
-            data = self.process.readAllStandardOutput().data().decode("utf-8", errors="replace")
-            for line in data.splitlines():
-                self.output.emit(line)
-
-    def _on_finished(self, exit_code):
-        self.finished.emit(exit_code)
-
-    def cancel(self):
-        if self.process:
-            self.process.kill()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # MAIN WINDOW
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -282,7 +247,6 @@ class W40kTranslatorGUI(QMainWindow):
         self.settings = QSettings("W40kTradutor", "DesktopApp")
         self.current_project: Dict[str, Any] = {}
         self.current_project_path: Optional[str] = None
-        self.active_process: Optional[QProcess] = None
         self.active_worker: Optional[TranslationWorker] = None
         self.recent_projects: List[str] = []
 
@@ -593,37 +557,57 @@ class W40kTranslatorGUI(QMainWindow):
         help_menu = menubar.addMenu("&Help")
         about = QAction("About / Scenarios", self)
         about.triggered.connect(lambda: QMessageBox.information(
-            self, "W40K Tradutor",
-            "Desktop GUI for the W40K Rogue Trader translation toolkit.\n\n"
-            "See SCENARIOS.md for the exact flows this app is built to support.\n\n"
-            "Preserve toggle = Scenario 1 (off) vs Scenario 2 (on)."
-        ))
+                    self, "W40K Tradutor",
+                    "Dual-track EN→PT-BR for Rogue Trader\n\n"
+                    "1) Pre-Scan (free)\n"
+                    "2) Preserve translation → EN mechanics + PT story\n"
+                    "3) Fullize (free) → 100% PT via glossary\n\n"
+                    "Exact wiki terms stay EN; terms inside phrases are hard-locked.\n"
+                    "Tags / Encyclopedia / {name} / {mf|…} never go to the LLM.\n"
+                    "Empty, placeholder, and EULA texts are skipped (no API).\n\n"
+                    "Smart batches: short×50 · medium×30 · long×12 · xlong×5.\n"
+                    "See README.md for CLI recipes."
+                ))
         help_menu.addAction(about)
 
     # ───────────────────────────────
-    # TAB: TRANSLATE (Scenarios 1 & 2)
+    # TAB: TRANSLATE (dual-track: Preserved + Full)
     # ───────────────────────────────
     def _create_translate_tab(self) -> QWidget:
         w = QWidget()
         layout = QVBoxLayout(w)
 
-        # Scenario hint
-        hint = QLabel("Scenario 1 (Full translate) → uncheck Preserve\nScenario 2 (Preserve wiki/mechanics) → check Preserve (recommended for Rogue Trader)")
-        hint.setStyleSheet("color: #8a7560; font-style: italic;")
-        layout.addWidget(hint)
+        guide = QLabel(
+            "<b>Dual-track workflow (recommended)</b><br>"
+            "<b>1.</b> Pre-Scan (free) → review EULA/skip counts<br>"
+            "<b>2.</b> Preserve ON → <b>Start Translation</b> → <code>ptBR_preserved</code> "
+            "(EN mechanics + PT narrative; hard-locks tags &amp; wiki terms inside phrases)<br>"
+            "<b>3.</b> <b>Fullize</b> (free, no API) → <code>ptBR_full</code> "
+            "(glossary EN→PT replace on the preserved file)<br>"
+            "<span style='color:#8a7560'>Exact whole-string wiki terms stay EN in step 2. "
+            "Empty/placeholder/EULA never hit the API. Smart batches: short×50 · med×30 · long×12 · xlong×5.</span>"
+        )
+        guide.setWordWrap(True)
+        guide.setStyleSheet(
+            "background:#1a1520; border:1px solid #3a3040; border-radius:6px; "
+            "padding:10px; color:#e8dcc8;"
+        )
+        layout.addWidget(guide)
 
         # Files group
         files_g = QGroupBox("Files")
         fl = QVBoxLayout(files_g)
 
         self.tr_input = self._file_row(fl, "Input (English JSON)", "data/en/enGB.json", self._pick_input)
-        self.tr_output = self._file_row(fl, "Output (PT-BR JSON)", "data/pt/ptBR.json", self._pick_output)
+        self.tr_output = self._file_row(fl, "Output — Preserved PT (EN terms + PT story)", "data/pt/ptBR_preserved.json", self._pick_output)
+        self.tr_full_output = self._file_row(fl, "Output — Full PT (100% PT via Fullize)", "data/pt/ptBR_full.json", self._pick_output)
         self.tr_glossary = self._file_row(fl, "Glossary", "glossary.json", self._pick_glossary)
-        self.tr_blacklist = self._file_row(fl, "Blacklist (UUIDs to skip, e.g. EULA)", "data/blacklists/blacklist.json", self._pick_blacklist)
-        self.tr_preserve_map = self._file_row(fl, "Preserve Map (UUID -> terms)", "preserve_map.json", self._pick_preserve_map)
+        self.tr_blacklist = self._file_row(fl, "Blacklist (optional UUIDs)", "data/blacklists/blacklist.json", self._pick_blacklist)
+        self.tr_preserve_map = self._file_row(fl, "Preserve Map (auto from Preserve run)", "preserve_map.json", self._pick_preserve_map)
         self.tr_preserve_map.setToolTip(
-            "Generated during a preserve-mode run. Lists every UUID that had a wiki/mechanic term preserved, "
-            "and which terms were preserved. Used by the second-pass button to retranslate only those strings with localized context."
+            "Written on Preserve runs: {uuid: {kind: exact|inline, terms: [...]}}.\n"
+            "exact = whole string was a wiki term (kept EN).\n"
+            "inline = terms hard-locked inside a translated phrase."
         )
 
         bl_btn = QPushButton("Interactive Blacklist Builder (scan for EULA, long texts, placeholders...)")
@@ -632,25 +616,31 @@ class W40kTranslatorGUI(QMainWindow):
 
         prescan_btn = QPushButton("🔍 Pre-Scan: Classify All UUIDs (FREE — no API cost)")
         prescan_btn.setToolTip(
-            "Classifies every UUID in the source file into 7 categories:\n"
-            "PRESERVED (free), SKIP, SHORT, MEDIUM, LONG, EULA, PENDING.\n"
-            "Shows exact counts + token estimates BEFORE you spend any money."
+            "Free classification before spending money:\n"
+            "• SKIP — empty / placeholder\n"
+            "• EULA — huge legal walls (auto-skipped by engine too)\n"
+            "• PRESERVED — exact glossary term (free EN keep)\n"
+            "• SHORT / MEDIUM / LONG — length tiers for smart batches\n"
+            "Note: inline term locks are applied at translate time (not only exact)."
         )
         prescan_btn.clicked.connect(self._prescan_source)
         fl.addWidget(prescan_btn)
 
         layout.addWidget(files_g)
 
-        # Big Preserve Toggle — the heart of scenarios 1 vs 2
-        preserve_box = QGroupBox()
-        preserve_layout = QHBoxLayout(preserve_box)
-        self.preserve_toggle = QCheckBox("PRESERVE WIKI & CORE MECHANICS TERMS  (Scenario 2 — recommended)")
+        # Big Preserve Toggle
+        preserve_box = QGroupBox("Preserve mode")
+        preserve_layout = QVBoxLayout(preserve_box)
+        self.preserve_toggle = QCheckBox("PRESERVE WIKI & CORE MECHANICS  (recommended — dual-track step 2)")
         self.preserve_toggle.setObjectName("big_toggle_label")
         self.preserve_toggle.setChecked(True)
         self.preserve_toggle.setToolTip(
-            "When ON: exact matches on glossary terms with preserve:true (wiki terms, weapons, talents, skills, attributes, etc.) "
-            "are kept in English and never sent to the LLM. Narrative text is still translated. "
-            "This is the normal desired behavior for Rogue Trader."
+            "ON (recommended):\n"
+            "• EXACT — whole string is a glossary term → keep English, no API\n"
+            "• INLINE — term inside a phrase → translate phrase, hard-lock term as §TERM§\n"
+            "• CLEAN — normal PT translation\n"
+            "• Tags / Encyclopedia / {name} / {mf|…} always hard-protected\n\n"
+            "OFF: full narrative translate (no EN term locks). Use Fullize after Preserve for 100% PT."
         )
         preserve_layout.addWidget(self.preserve_toggle)
         layout.addWidget(preserve_box)
@@ -736,19 +726,37 @@ class W40kTranslatorGUI(QMainWindow):
 
         # Actions
         action_layout = QHBoxLayout()
-        self.translate_btn = QPushButton("▶ START TRANSLATION")
+        self.translate_btn = QPushButton("▶ 1) START PRESERVE TRANSLATION")
         self.translate_btn.setObjectName("primary")
-        self.translate_btn.clicked.connect(self._start_translation)
+        self.translate_btn.setToolTip(
+            "Step 2 of dual-track.\n"
+            "Preserve ON → EN mechanics + PT story → Output Preserved.\n"
+            "Smart batches + EULA/placeholder skip + hard tag protect."
+        )
+        self.translate_btn.clicked.connect(lambda: self._start_translation(optimized=True))
         action_layout.addWidget(self.translate_btn)
 
+        self.fullize_btn = QPushButton("✨ 2) FULLIZE → 100% PT (FREE)")
+        self.fullize_btn.setObjectName("primary")
+        self.fullize_btn.setToolTip(
+            "Step 3 of dual-track — NO API cost.\n"
+            "Reads Output Preserved, replaces glossary EN terms with PT, writes Output Full."
+        )
+        self.fullize_btn.clicked.connect(self._start_fullize)
+        action_layout.addWidget(self.fullize_btn)
+
         self.dryrun_quick_btn = QPushButton("Dry Run (safe test)")
-        self.dryrun_quick_btn.clicked.connect(lambda: (self.dry_run_cb.setChecked(True), self._start_translation()))
+        self.dryrun_quick_btn.setToolTip("No API calls — classify + protect tags/terms only.")
+        self.dryrun_quick_btn.clicked.connect(
+            lambda: (self.dry_run_cb.setChecked(True), self._start_translation(optimized=True))
+        )
         action_layout.addWidget(self.dryrun_quick_btn)
 
-        self.retranslate_btn = QPushButton("🔁 2ND PASS: Retranslate Preserved UUIDs")
+        self.retranslate_btn = QPushButton("🔁 Advanced: LLM 2nd pass (legacy)")
         self.retranslate_btn.setToolTip(
-            "Uses the Preserve Map to translate ONLY the UUIDs that had wiki/mechanic terms preserved. "
-            "Preserve toggle is ignored (full localized translation)."
+            "LEGACY / special cases only.\n"
+            "Prefer Fullize (free) for the Full track.\n"
+            "This re-sends preserved UUIDs to the LLM (costs money)."
         )
         self.retranslate_btn.clicked.connect(self._start_second_pass)
         action_layout.addWidget(self.retranslate_btn)
@@ -1158,10 +1166,8 @@ class W40kTranslatorGUI(QMainWindow):
                     glossary = None
                     if self.glossary_available:
                         try:
-                            from tradutor import SmartGlossary
-                            preserve_cats = {"weapon","talent","skill","ability","attribute","lore",
-                                            "armour","helmet","consumable","necklace","gloves","cloak",
-                                            "boots","pet_protocol","conviction","archetype","homeworld","origin"}
+                            from tradutor import SmartGlossary, DEFAULT_PRESERVE_CATS
+                            preserve_cats = set(DEFAULT_PRESERVE_CATS)
                             glossary = SmartGlossary(self.glossary_path, "preserve", preserve_cats)
                         except Exception:
                             pass
@@ -1376,9 +1382,13 @@ class W40kTranslatorGUI(QMainWindow):
             f"({len(buckets['SHORT'])} short, {len(buckets['MEDIUM'])} medium, "
             f"{len(buckets['LONG'])} long, {len(buckets['PENDING'])} pending)<br><br>"
             f"Est. API cost: <b>${est_cost}</b> with {model_now}<br>"
-            f"Savings: {preserved_count + skip_count} strings ({(preserved_count + skip_count)/max(total,1)*100:.0f}%) cost ZERO<br>"
-            f"<small>Note: PRESERVED count uses exact match only (instant). "
-            f"Actual translation may preserve additional strings via contains matching.</small>"
+            f"Savings: {preserved_count + skip_count} strings "
+            f"({(preserved_count + skip_count)/max(total,1)*100:.0f}%) cost ZERO "
+            f"(exact EN + empty/placeholder; EULA also free at translate time)<br>"
+            f"<small>PRESERVED here = <b>exact</b> glossary match only. "
+            f"At translate time, terms <b>inside phrases</b> are hard-locked (inline), "
+            f"not skipped as whole English sentences. "
+            f"Engine also auto-skips empty/placeholder/EULA without a blacklist.</small>"
         )
         summary.setWordWrap(True)
         lay.addWidget(summary)
@@ -1932,7 +1942,7 @@ class W40kTranslatorGUI(QMainWindow):
                 else:
                     env["DEEPSEEK_BASE_URL"] = env.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
             self._run_external(cmd, "Wiki Sync (official terms)", custom_env=env if key else None)
-            # Chaining happens in _on_process_finished
+            # Chaining → AI extraction happens in _on_worker_finished
         else:
             reply2 = QMessageBox.question(
                 self, "AI Term Extraction — COSTS REAL MONEY",
@@ -2005,8 +2015,7 @@ class W40kTranslatorGUI(QMainWindow):
                 env["DEEPSEEK_BASE_URL"] = env.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
         self._run_external(cmd, "AI Glossary Population (term extraction)", custom_env=env if key else None)
-
-        # The final "review the glossary" message is shown in _on_process_finished when this task completes.
+        # Completion dialog is shown in _on_worker_finished.
 
     def _live_wiki_scrape_dialog(self):
         """Manual / on-demand wiki connection (user request for live instead of only offline scrape)."""
@@ -2536,7 +2545,10 @@ class W40kTranslatorGUI(QMainWindow):
                                         if item.get("Text", "").strip().lower() in g._preserve_index)
                     if preserve_count > 0:
                         pct = round(preserve_count / max(n_items, 1) * 100)
-                        preserve_info = f" | Est. preserved (no API cost): {preserve_count} ({pct}%)"
+                        preserve_info = (
+                            f" | Exact glossary EN (free): ~{preserve_count} ({pct}%) "
+                            f"— plus inline locks at translate time"
+                        )
                 except Exception:
                     pass
 
@@ -2552,7 +2564,10 @@ class W40kTranslatorGUI(QMainWindow):
                     f"• Estimated API cost: ~${est_cost}\n\n"
                 )
                 if preserve_on:
-                    warning_msg += "Preserve is ON — wiki terms will be kept in English (free).\n\n"
+                    warning_msg += (
+                        "Preserve ON — exact wiki terms stay EN (free); "
+                        "phrases with terms still translate with hard locks.\n\n"
+                    )
                 warning_msg += (
                     f"RECOMMENDATION: Switch to a cheaper model to save money:\n"
                     f"• deepseek-v4-flash (fast + cheap, ~10x cheaper)\n"
@@ -2574,8 +2589,8 @@ class W40kTranslatorGUI(QMainWindow):
             cmd += ["-g", gloss]
 
         if preserve_on:
-            cmd += ["--mode", "preserve", "--preserve-cats",
-                    "weapon,talent,skill,ability,attribute,lore,armour,helmet,consumable,necklace,gloves,cloak,boots,pet_protocol,conviction,archetype,homeworld,origin"]
+            from tradutor import DEFAULT_PRESERVE_CATS_CSV
+            cmd += ["--mode", "preserve", "--preserve-cats", DEFAULT_PRESERVE_CATS_CSV]
         else:
             cmd += ["--mode", "complete"]
 
@@ -2644,7 +2659,7 @@ class W40kTranslatorGUI(QMainWindow):
 
         self._append_log(f"Starting translation: {' '.join(cmd)}")
         self._append_log(f"Model: {model_name}")
-        self._append_log(f"Preserve mode: {'ON (wiki/mechanics protected)' if preserve_on else 'OFF (full translation)'}")
+        self._append_log(f"Preserve mode: {'ON (exact EN + inline term lock)' if preserve_on else 'OFF (full translate)'}")
         self._append_log(f"Provider: {provider} | Base URL effective: {env.get('DEEPSEEK_BASE_URL', '(default)')} | Key: {key_source}")
         if self.tr_blacklist.text().strip():
             cmd += ["--blacklist", self.tr_blacklist.text().strip()]
@@ -2654,25 +2669,69 @@ class W40kTranslatorGUI(QMainWindow):
         if preserve_on:
             cmd += ["--preserve-map", preserve_map_path]
 
-        # Add optimized batch flag if requested — tradutor.py will use maximum
-        # tier sizes (50/30/12/5) regardless of the base batch_size value.
-        if optimized:
+        # Smart batches always on (engine default); flag kept for older tradutor.py)
+        if optimized or True:
             cmd.append("--optimized-batch")
 
-        # Use the improved TranslationWorker
-        # - Live progress + stats + cancel
-        # - Respects interactive blacklist (EULA etc.)
-        # - Can auto-populate glossary during the run if the checkbox is on
-        task_label = "Translation (Optimized)" if optimized else "Translation"
-        self._start_with_worker(cmd, task_label, env)  # will launch via worker + signals
+        task_label = "Preserve Translation" if preserve_on else "Full Translation"
+        if self.dry_run_cb.isChecked():
+            task_label = "Dry Run — " + task_label
+        self._start_with_worker(cmd, task_label, env)
+
+    def _start_fullize(self):
+        """Free Full track: glossary EN→PT replace on the Preserved output (no LLM)."""
+        src = self.tr_output.text().strip()
+        outp = self.tr_full_output.text().strip() if hasattr(self, "tr_full_output") else ""
+        gloss = self.tr_glossary.text().strip() or (
+            self.glossary_path_edit.text().strip() if hasattr(self, "glossary_path_edit") else ""
+        )
+
+        if not src or not os.path.exists(src):
+            QMessageBox.warning(
+                self, "No Preserved file",
+                "Set Output — Preserved PT to an existing preserve-mode result first.\n\n"
+                "Run step 1 (Start Preserve Translation) before Fullize.",
+            )
+            return
+        if not outp:
+            QMessageBox.warning(self, "No Full output path", "Set Output — Full PT path.")
+            return
+        if not gloss or not os.path.exists(gloss):
+            QMessageBox.warning(self, "No glossary", "Glossary is required for Fullize (EN→PT map).")
+            return
+
+        reply = QMessageBox.question(
+            self, "Fullize (FREE — no API)",
+            f"Build 100% PT file from preserved translation?\n\n"
+            f"Input (preserved):\n  {src}\n\n"
+            f"Output (full):\n  {outp}\n\n"
+            f"Glossary:\n  {gloss}\n\n"
+            f"No LLM calls — longest-first word-boundary replace of glossary terms.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        cmd = [
+            sys.executable, "tradutor.py", "--fullize",
+            "-i", src, "-o", outp, "-g", gloss,
+        ]
+        self._append_log(f"Fullize (free): {' '.join(cmd)}")
+        self._start_with_worker(cmd, "Fullize (free EN→PT)", os.environ.copy())
 
     def _start_second_pass(self):
-        """Second pass: translate only the UUIDs that were preserved in a previous preserve run.
+        """LEGACY: LLM retranslate of preserve-map UUIDs. Prefer Fullize for Full track."""
+        tip = QMessageBox.information(
+            self, "Prefer Fullize",
+            "For the Full (100% PT) track, use Fullize — it is free and uses your glossary PT terms.\n\n"
+            "Continue with the paid LLM 2nd pass only if you need model rewriting beyond glossary replace.",
+            QMessageBox.Ok | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if tip != QMessageBox.Ok:
+            return
 
-        Uses --retranslate-map to feed the preserve map into tradutor.py. The preserve toggle
-        is ignored on purpose because this pass is meant to localize the previously-preserved
-        strings with the glossary PT terms as consistency guidance.
-        """
         inp = self.tr_input.text().strip()
         if not inp or not os.path.exists(inp):
             QMessageBox.warning(self, "No input", "Please select a valid Input (English JSON) first.")
@@ -2765,81 +2824,43 @@ class W40kTranslatorGUI(QMainWindow):
         self._start_with_worker(cmd, "Second-Pass Translation", env)
 
     def _run_external(self, cmd: List[str], task_name: str, custom_env: Optional[dict] = None):
-        """Run a python script via QProcess and feed output to the log (used for Audit, Merge, Wiki Sync etc.)."""
+        """ponytail: one runner — same TranslationWorker path as translate."""
+        self._start_with_worker(cmd, task_name, custom_env)
+
+    def _start_with_worker(self, cmd: List[str], task_name: str, env: Optional[dict] = None):
+        """Launch any CLI via TranslationWorker (cmd fully built by caller)."""
         self._append_log(f"=== {task_name} started ===")
         self.progress.setValue(0)
         self.cancel_btn.setEnabled(True)
 
-        self.active_process = QProcess()
-        self.active_process.setProcessChannelMode(QProcess.MergedChannels)
-
-        if custom_env:
-            qenv = self.active_process.processEnvironment()
-            for k, v in custom_env.items():
-                qenv.insert(k, str(v))
-            self.active_process.setProcessEnvironment(qenv)
-
-        self.active_process.readyReadStandardOutput.connect(self._on_process_output)
-        self.active_process.finished.connect(lambda code: self._on_process_finished(code, task_name))
-        self.active_process.start(cmd[0], cmd[1:])
-
-    def _start_with_worker(self, cmd: List[str], task_name: str, env: Optional[dict] = None):
-        """Launch translation via the TranslationWorker for better live interactive feedback."""
-        self._append_log(f"=== {task_name} started (via worker) ===")
-        self.progress.setValue(0)
-        self.cancel_btn.setEnabled(True)
-
-        # Pass the already-built command + environment so the worker doesn't
-        # have to reconstruct them. This keeps preserve_map preprocessing,
-        # blacklist, model and provider choices intact.
-        self.active_worker = TranslationWorker(
-            cmd=cmd,
-            env=env,
-            # Keep fallback fields so the worker can still build a command if needed
-            input_path=self.tr_input.text().strip(),
-            output_path=self.tr_output.text().strip(),
-            glossary_path=self.tr_glossary.text().strip() or "",
-            preserve=self.preserve_toggle.isChecked(),
-            provider=self.provider_combo.currentText(),
-            model=self.model_edit.currentText().strip() or "deepseek-v4-pro",
-            batch=self.batch_spin.value(),
-            workers=self.workers_spin.value(),
-            temp=self.temp_spin.value(),
-            dry_run=self.dry_run_cb.isChecked(),
-            api_key=self.api_key_edit.text().strip(),
-            blacklist_path=self.tr_blacklist.text().strip() if hasattr(self, "tr_blacklist") else "",
-            extract_every=5 if (hasattr(self, "auto_extract_cb") and self.auto_extract_cb.isChecked()) else 0,
-        )
+        self.active_worker = TranslationWorker(cmd=cmd, env=env)
         self.active_worker.signals.log.connect(self._append_log)
         self.active_worker.signals.progress.connect(self._on_worker_progress)
         self.active_worker.signals.stats.connect(self._on_worker_stats)
         self.active_worker.signals.finished.connect(lambda ok, msg: self._on_worker_finished(ok, msg, task_name))
         self.active_worker.start()
 
-    def _on_process_output(self):
-        if self.active_process:
-            data = self.active_process.readAllStandardOutput().data().decode("utf-8", errors="replace")
-            for line in data.splitlines():
-                self._append_log(line)
-                # Very rough progress from tqdm style lines
-                if "%" in line and "|" in line:
-                    try:
-                        pct = int(line.split("%")[0].split()[-1])
-                        self.progress.setValue(min(100, max(0, pct)))
-                    except:
-                        pass
+    def _on_worker_progress(self, current: int, total: int, message: str):
+        pct = int((current / max(total, 1)) * 100)
+        self.progress.setValue(pct)
+        self._append_log(f"[progress] {message} ({current}/{total})")
 
-    def _on_process_finished(self, exit_code: int, task_name: str):
-        self._append_log(f"=== {task_name} finished (exit={exit_code}) ===")
-        self.progress.setValue(100 if exit_code == 0 else 50)
+    def _on_worker_stats(self, stats: dict):
+        self._append_log(
+            f"[stats] Tokens: {stats.get('tokens', '?')} | Est. cost: ${stats.get('cost_usd', '?')} | "
+            f"Preserved: {stats.get('preserved', '?')}"
+        )
+
+    def _on_worker_finished(self, success: bool, message: str, task_name: str):
+        self._append_log(f"=== {task_name} finished: {message} ===")
+        self.progress.setValue(100 if success else 60)
         self.cancel_btn.setEnabled(False)
-        self.active_process = None
+        self.active_worker = None
 
-        # Handle chaining for Populate Glossary flow
+        # Populate-glossary chain: wiki sync → AI extraction
         if task_name == "Wiki Sync (official terms)":
-            if exit_code == 0 and self._pending_population_source and self._pending_population_glossary:
+            if success and self._pending_population_source and self._pending_population_glossary:
                 self._append_log("Wiki Sync succeeded. Starting AI extraction step...")
-                # Cost confirmation before auto-chaining (prevents budget surprises)
                 try:
                     with open(self._pending_population_source, "r", encoding="utf-8") as f:
                         sd = json.load(f)
@@ -2847,74 +2868,60 @@ class W40kTranslatorGUI(QMainWindow):
                     est_api_calls = max(1, n // 8 // 20)  # batch_size=8, extract_every=20
                     model_now = self.model_edit.currentText().strip() or "deepseek-v4-pro"
                     confirm_msg = (
-                        f"Wiki Sync done! Now: AI term extraction.\\n\\n"
-                        f"Source: ~{n:,} strings → ~{est_api_calls} extraction API calls.\\n"
-                        f"Model: {model_now}\\n\\n"
-                        f"ESTIMATED COST: ${round(est_api_calls * 0.003, 2)}–${round(est_api_calls * 0.01, 2)} USD\\n\\n"
-                        f"RECOMMENDATION: Use deepseek-v4-flash for this step.\\n\\n"
+                        f"Wiki Sync done! Now: AI term extraction.\n\n"
+                        f"Source: ~{n:,} strings → ~{est_api_calls} extraction API calls.\n"
+                        f"Model: {model_now}\n\n"
+                        f"ESTIMATED COST: ${round(est_api_calls * 0.003, 2)}–${round(est_api_calls * 0.01, 2)} USD\n\n"
+                        f"RECOMMENDATION: Use deepseek-v4-flash for this step.\n\n"
                         f"Continue with AI extraction?"
                     )
-                    reply = QMessageBox.question(self, "Budget Confirmation — AI Extraction", confirm_msg,
-                                                QMessageBox.Yes | QMessageBox.No)
+                    reply = QMessageBox.question(
+                        self, "Budget Confirmation — AI Extraction", confirm_msg,
+                        QMessageBox.Yes | QMessageBox.No,
+                    )
                     if reply != QMessageBox.Yes:
                         self._append_log("AI extraction cancelled by user after wiki sync.")
                         self._pending_population_source = None
                         self._pending_population_glossary = None
+                        self._update_status(f"{task_name} completed successfully.")
                         return
                 except Exception:
                     pass
                 self._start_ai_extraction_step(
                     self._pending_population_source,
-                    self._pending_population_glossary
+                    self._pending_population_glossary,
                 )
                 self._pending_population_source = None
                 self._pending_population_glossary = None
-            elif exit_code != 0:
-                self._append_log("Wiki Sync failed. You can try the 'Wiki Sync (offline data)' button manually and then run population again.")
+            elif not success:
+                self._append_log(
+                    "Wiki Sync failed. Try 'Wiki Sync (offline data)' manually, then run population again."
+                )
                 self._pending_population_source = None
                 self._pending_population_glossary = None
 
         elif task_name == "AI Glossary Population (term extraction)":
-            if exit_code == 0:
-                self._append_log("=== AI Glossary Population (term extraction) finished successfully ===")
+            if success:
                 QMessageBox.information(
                     self, "Glossary Population Complete",
                     "Both steps finished.\n\n"
-                    "Go to the Glossary tab, review the new terms (edit Preserve flags for names/locations/lore if needed),\n"
-                    "then run your normal translation. The glossary will be much stronger."
+                    "Go to the Glossary tab, review the new terms (edit Preserve flags if needed),\n"
+                    "then run your normal translation.",
                 )
             else:
-                self._append_log("=== AI Glossary Population (term extraction) had errors ===")
                 QMessageBox.warning(
                     self, "Population Finished with Errors",
-                    f"The extraction step returned exit code {exit_code}.\n"
-                    "Check the log pane for details from tradutor.py. You may still have partial results in the glossary."
+                    f"{message}\n\nCheck the log. You may still have partial results in the glossary.",
                 )
 
-        # Auto-reload glossary table if an external task touched the glossary file
-        if exit_code == 0 and task_name in ("Wiki Sync (official terms)", "AI Glossary Population (term extraction)", "Wiki Sync"):
+        if success and task_name in (
+            "Wiki Sync (official terms)",
+            "AI Glossary Population (term extraction)",
+            "Wiki Sync",
+        ):
             self._load_glossary_into_table()
             self._append_log("Glossary table reloaded with updated file.")
 
-        if exit_code == 0:
-            self._update_status(f"{task_name} completed successfully.")
-        else:
-            self._update_status(f"{task_name} failed (see log).")
-
-    # Worker signal handlers (for live interactive translation)
-    def _on_worker_progress(self, current: int, total: int, message: str):
-        pct = int((current / max(total, 1)) * 100)
-        self.progress.setValue(pct)
-        self._append_log(f"[progress] {message} ({current}/{total})")
-
-    def _on_worker_stats(self, stats: dict):
-        self._append_log(f"[stats] Tokens: {stats.get('tokens', '?')} | Est. cost: ${stats.get('cost_usd', '?')} | Preserved: {stats.get('preserved', '?')}")
-
-    def _on_worker_finished(self, success: bool, message: str, task_name: str):
-        self._append_log(f"=== {task_name} finished: {message} ===")
-        self.progress.setValue(100 if success else 60)
-        self.cancel_btn.setEnabled(False)
-        self.active_worker = None
         if success:
             self._update_status(f"{task_name} completed successfully.")
         else:
@@ -2922,21 +2929,13 @@ class W40kTranslatorGUI(QMainWindow):
 
     def _cancel_current(self):
         cancelled = False
-        if self.active_process:
-            try:
-                self.active_process.kill()
-                self._append_log("=== Task cancelled by user (process killed) ===")
-            except Exception as e:
-                self._append_log(f"Error killing process: {e}")
-            cancelled = True
         if self.active_worker:
             try:
                 self.active_worker.cancel()
-                self._append_log("=== Cancellation requested for translation worker ===")
+                self._append_log("=== Cancellation requested ===")
             except Exception as e:
                 self._append_log(f"Error cancelling worker: {e}")
             cancelled = True
-        # Handle the separate Wiki Glossary translation worker (Translate Wiki Terms button)
         if hasattr(self, "_wiki_worker") and self._wiki_worker is not None:
             try:
                 if self._wiki_worker.isRunning():
@@ -3018,10 +3017,11 @@ class W40kTranslatorGUI(QMainWindow):
         state = {
             "version": "1.0",
             "saved_at": datetime.now().isoformat(),
-            # Translate tab (Scenarios 1 & 2)
+            # Translate tab (dual-track)
             "translate": {
                 "input": safe_text(getattr(self, 'tr_input', None)) or last.get("input", ""),
                 "output": safe_text(getattr(self, 'tr_output', None)) or last.get("output", ""),
+                "full_output": safe_text(getattr(self, 'tr_full_output', None)) or last.get("full_output", ""),
                 "glossary": safe_text(getattr(self, 'tr_glossary', None)) or safe_text(getattr(self, 'glossary_path_edit', None)) or last.get("glossary", ""),
                 "blacklist": safe_text(getattr(self, 'tr_blacklist', None)) if hasattr(self, 'tr_blacklist') else last.get("blacklist", ""),
                 "preserve_map": safe_text(getattr(self, 'tr_preserve_map', None)) if hasattr(self, 'tr_preserve_map') else last.get("preserve_map", ""),
@@ -3060,6 +3060,8 @@ class W40kTranslatorGUI(QMainWindow):
             t = proj.get("translate", {})
             if t.get("input"): self.tr_input.setText(t["input"])
             if t.get("output"): self.tr_output.setText(t["output"])
+            if t.get("full_output") and hasattr(self, "tr_full_output"):
+                self.tr_full_output.setText(t["full_output"])
             if t.get("glossary"):
                 self.tr_glossary.setText(t["glossary"])
                 if hasattr(self, "glossary_path_edit"):
@@ -3469,24 +3471,13 @@ class W40kTranslatorGUI(QMainWindow):
             except Exception:
                 pass
 
-        # Kill any QProcess (wiki_sync, glossary population, audit, merge, etc.)
-        if self.active_process:
-            try:
-                self.active_process.kill()
-                self._append_log("Killed running external process.")
-            except Exception:
-                pass
-
-        # Cancel the main TranslationWorker (which manages a subprocess)
+        # Cancel CLI worker (tradutor / wiki_sync / audit / merge) — wait so subprocess dies
         if self.active_worker:
             try:
                 self.active_worker.cancel()
-                self._append_log("Cancelled main translation worker — waiting for shutdown...")
-                # CRITICAL: wait for the QThread to actually finish, otherwise
-                # the subprocess (tradutor.py) keeps running in the background
-                # after the window closes, burning API budget.
+                self._append_log("Cancelled worker — waiting for shutdown...")
                 if self.active_worker.isRunning():
-                    self.active_worker.wait(5000)  # 5 second timeout
+                    self.active_worker.wait(5000)
                 self.active_worker = None
             except Exception:
                 pass
@@ -3773,91 +3764,28 @@ class WikiTranslateWorker(QThread):
 
 
 class TranslationWorker(QThread):
-    """Background worker for translation.
+    """Run a pre-built tradutor.py command; stream logs/progress; hard-kill on cancel."""
 
-    Currently uses the robust tradutor.py (your previous batch/parallel/skip logic)
-    but wrapped in a QThread so the GUI gets live signals for progress, logs,
-    stats and proper cancellation — much better for huge files (78k+ lines).
-
-    Improvements made:
-    - Full support for blacklist (from the interactive builder)
-    - Support for glossary auto-population during translation (--extract-every)
-    - Better progress parsing from tqdm output
-    - Cleaner stats at the end
-    - Easy to evolve to 100% direct calls later (using SmartGlossary + TranslationEngine directly)
-    """
-    def __init__(self, input_path: str = "", output_path: str = "", glossary_path: str = "",
-                 preserve: bool = False, provider: str = "", model: str = "", batch: int = 10,
-                 workers: int = 3, temp: float = 0.15, dry_run: bool = False, api_key: str = "",
-                 blacklist_path: str = "", extract_every: int = 0,
-                 cmd: Optional[List[str]] = None, env: Optional[dict] = None):
+    def __init__(self, cmd: List[str], env: Optional[dict] = None):
         super().__init__()
         self.signals = TranslationSignals()
-        self.input_path = input_path
-        self.output_path = output_path
-        self.glossary_path = glossary_path
-        self.preserve = preserve
-        self.provider = provider
-        self.model = model
-        self.batch = batch
-        self.workers = workers
-        self.temp = temp
-        self.dry_run = dry_run
-        self.api_key = api_key
-        self.blacklist_path = blacklist_path
-        self.extract_every = extract_every   # 0 = disabled, >0 = auto-extract terms every N batches (great for first population pass)
         self.cmd = cmd
         self.env = env
         self._cancel_requested = False
         self._proc = None
 
     def run(self):
-        self.signals.log.emit("Translation worker started — using robust batch/parallel/skip logic from tradutor.py (your old workflow).")
-        # For huge 78k+ line files we still delegate the heavy lifting (batching, parallel workers, SKIP_TEXTS, blacklist, tag protection, resume)
-        # to the proven tradutor.py while this worker provides live GUI signals.
         try:
-            if self.cmd:
-                # GUI already built the full command + environment (respects preserve_map, blacklist, etc.)
-                cmd = self.cmd
-                env = self.env if self.env is not None else os.environ.copy()
-            else:
-                # Fallback: build command ourselves
-                cmd = [sys.executable, "tradutor.py", "-i", self.input_path, "-o", self.output_path]
-                if self.glossary_path:
-                    cmd += ["-g", self.glossary_path]
-                if self.preserve:
-                    cmd += ["--mode", "preserve", "--preserve-cats",
-                            "weapon,talent,skill,ability,attribute,lore,armour,helmet,consumable,necklace,gloves,cloak,boots,pet_protocol,conviction,archetype,homeworld,origin"]
-                else:
-                    cmd += ["--mode", "complete"]
-                if self.dry_run:
-                    cmd.append("--dry-run")
-                if self.blacklist_path and os.path.exists(self.blacklist_path):
-                    cmd += ["--blacklist", self.blacklist_path]
-                cmd += ["-b", str(self.batch), "-w", str(self.workers), "--temperature", str(self.temp), "--model", self.model]
-
-                if self.extract_every > 0:
-                    cmd += ["--extract-every", str(self.extract_every)]
-                    self.signals.log.emit(f"[GLOSSARY] Auto-extraction enabled every {self.extract_every} batches (good for first-pass population)")
-
-                env = os.environ.copy()
-                if self.api_key:
-                    env["DEEPSEEK_API_KEY"] = self.api_key
-                    env["OPENAI_API_KEY"] = self.api_key
-                if "GLM" in self.provider or "Zhipu" in self.provider:
-                    env["DEEPSEEK_BASE_URL"] = "https://open.bigmodel.cn/api/paas/v4"
-                else:
-                    env["DEEPSEEK_BASE_URL"] = env.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-
+            cmd = self.cmd
+            env = self.env if self.env is not None else os.environ.copy()
             self.signals.log.emit(f"Launching: {' '.join(cmd)}")
 
-            # Use subprocess so we get the real powerful logic (parallel workers, skipping EULA/placeholders via existing code, blacklist, auto-extract)
-            self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env
+            )
 
-            total_items_estimate = 0
-            processed = 0
-            final_counts = None  # parsed from tradutor.py's summary line (#6)
-            for line in iter(self._proc.stdout.readline, ''):
+            final_counts = None
+            for line in iter(self._proc.stdout.readline, ""):
                 if self._cancel_requested:
                     self._proc.terminate()
                     try:
@@ -3867,46 +3795,37 @@ class TranslationWorker(QThread):
                     self.signals.finished.emit(False, "Cancelled by user")
                     return
                 line = line.rstrip()
-                if line:
-                    self.signals.log.emit(line)
+                if not line:
+                    continue
+                self.signals.log.emit(line)
 
-                    # Improved progress parsing (tqdm in tradutor shows items)
-                    if "%" in line and "|" in line:
-                        try:
-                            # Example tradutor tqdm line:  42%|████▏     |  1234/2900 [00:12<00:18,  92.3it/s]
-                            parts = line.split()
-                            for i, p in enumerate(parts):
-                                if "%" in p:
-                                    pct = int(p.replace("%", ""))
-                                    self.signals.progress.emit(pct, 100, "Processing batches...")
-                                if "/" in p and i > 0:
-                                    nums = p.split("/")
-                                    if len(nums) == 2:
-                                        processed = int(nums[0])
-                                        total_items_estimate = int(nums[1])
-                        except Exception:
-                            pass
+                if "%" in line and "|" in line:
+                    try:
+                        parts = line.split()
+                        for i, p in enumerate(parts):
+                            if "%" in p:
+                                pct = int(p.replace("%", ""))
+                                self.signals.progress.emit(pct, 100, "Processing batches...")
+                            if "/" in p and i > 0:
+                                nums = p.split("/")
+                                if len(nums) == 2:
+                                    int(nums[0]); int(nums[1])  # validate only
+                    except Exception:
+                        pass
 
-                    # Capture tradutor.py's final summary, e.g.:
-                    # "✅ Concluído: 1234 traduzidos | 5 falhas | 678 preservados" (#6)
-                    if "Concluído:" in line:
-                        nums = re.findall(r"\d+", line)
-                        if len(nums) >= 3:
-                            final_counts = {
-                                "translated": int(nums[0]),
-                                "failed": int(nums[1]),
-                                "preserved": int(nums[2]),
-                            }
-
-                    # Detect when glossary extraction happened
-                    if "extract" in line.lower() or "glossary" in line.lower():
-                        self.signals.log.emit("[GLOSSARY] Term extraction activity detected.")
+                # e.g. "✅ Concluído: 1234 traduzidos | 5 falhas | 678 preservados"
+                if "Concluído:" in line:
+                    nums = re.findall(r"\d+", line)
+                    if len(nums) >= 3:
+                        final_counts = {
+                            "translated": int(nums[0]),
+                            "failed": int(nums[1]),
+                            "preserved": int(nums[2]),
+                        }
 
             self._proc.stdout.close()
             exit_code = self._proc.wait()
 
-            # Report only real numbers: counts parsed from tradutor.py's own
-            # summary line; anything else stays "see log" — no invented stats. (#6)
             run_stats = {
                 "tokens": "see final log lines",
                 "cost_usd": "see final log lines",
@@ -3919,24 +3838,15 @@ class TranslationWorker(QThread):
             self.signals.stats.emit(run_stats)
 
             if exit_code == 0:
-                msg = "Translation completed successfully (batches + parallel workers from tradutor.py)."
-                if self.extract_every > 0:
-                    msg += " Glossary was also populated during the run."
-                self.signals.finished.emit(True, msg)
+                self.signals.finished.emit(True, "Completed successfully.")
             else:
-                self.signals.finished.emit(False, f"tradutor.py exited with code {exit_code}")
+                self.signals.finished.emit(False, f"Command exited with code {exit_code}")
 
         except Exception as e:
             self.signals.finished.emit(False, f"Worker error: {e}")
 
     def cancel(self):
-        """Cancel the translation: set the flag AND kill the subprocess directly.
-
-        Just setting _cancel_requested is not enough — the flag is only checked
-        between stdout reads, so if tradutor.py is waiting on an API call the
-        cancellation can hang for a long time. Killing the subprocess forces an
-        immediate exit.
-        """
+        """Flag + kill subprocess (flag alone hangs while waiting on API)."""
         self._cancel_requested = True
         if self._proc:
             try:
@@ -3947,7 +3857,6 @@ class TranslationWorker(QThread):
                     self._proc.kill()
                     self._proc.wait(timeout=2)
             except Exception:
-                # Best-effort: try kill as last resort
                 try:
                     self._proc.kill()
                 except Exception:

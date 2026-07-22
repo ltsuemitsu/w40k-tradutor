@@ -421,7 +421,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.904482"
+      "created_at": "2026-06-17T22:52:09.904482",
+      "inline": false
     },
     {
       "term_english": "Aggressive Protocol",
@@ -542,7 +543,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.904651"
+      "created_at": "2026-06-17T22:52:09.904651",
+      "inline": false
     },
     {
       "term_english": "Ammunition Bags",
@@ -619,7 +621,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.904760"
+      "created_at": "2026-06-17T22:52:09.904760",
+      "inline": false
     },
     {
       "term_english": "AP Increase",
@@ -718,7 +721,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "high",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.904900"
+      "created_at": "2026-06-17T22:52:09.904900",
+      "inline": false
     },
     {
       "term_english": "At Any Cost",
@@ -1950,7 +1954,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.906859"
+      "created_at": "2026-06-17T22:52:09.906859",
+      "inline": false
     },
     {
       "term_english": "Cautious Disengage",
@@ -2434,7 +2439,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.907542"
+      "created_at": "2026-06-17T22:52:09.907542",
+      "inline": false
     },
     {
       "term_english": "Contempt for the Weak",
@@ -3182,7 +3188,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.908573"
+      "created_at": "2026-06-17T22:52:09.908573",
+      "inline": false
     },
     {
       "term_english": "Destroyer",
@@ -3193,7 +3200,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.908588"
+      "created_at": "2026-06-17T22:52:09.908588",
+      "inline": false
     },
     {
       "term_english": "Deterioration",
@@ -3237,7 +3245,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.908648"
+      "created_at": "2026-06-17T22:52:09.908648",
+      "inline": false
     },
     {
       "term_english": "Disastrous Collision",
@@ -3270,7 +3279,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.908695"
+      "created_at": "2026-06-17T22:52:09.908695",
+      "inline": false
     },
     {
       "term_english": "Dismantle",
@@ -3347,7 +3357,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.908801"
+      "created_at": "2026-06-17T22:52:09.908801",
+      "inline": false
     },
     {
       "term_english": "Diversion Zone",
@@ -3622,7 +3633,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "high",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.909190"
+      "created_at": "2026-06-17T22:52:09.909190",
+      "inline": false
     },
     {
       "term_english": "Elusive Speed",
@@ -4645,7 +4657,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.910808"
+      "created_at": "2026-06-17T22:52:09.910808",
+      "inline": false
     },
     {
       "term_english": "Fortress Zone",
@@ -4667,7 +4680,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.910839"
+      "created_at": "2026-06-17T22:52:09.910839",
+      "inline": false
     },
     {
       "term_english": "Foul Play",
@@ -4755,7 +4769,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.910965"
+      "created_at": "2026-06-17T22:52:09.910965",
+      "inline": false
     },
     {
       "term_english": "Gargantuan Strength",
@@ -4931,7 +4946,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.911218"
+      "created_at": "2026-06-17T22:52:09.911218",
+      "inline": false
     },
     {
       "term_english": "Guide of Souls",
@@ -5646,7 +5662,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.912190"
+      "created_at": "2026-06-17T22:52:09.912190",
+      "inline": false
     },
     {
       "term_english": "Interception",
@@ -5679,7 +5696,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.912234"
+      "created_at": "2026-06-17T22:52:09.912234",
+      "inline": false
     },
     {
       "term_english": "Invigorating Hatred",
@@ -6251,7 +6269,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.913005"
+      "created_at": "2026-06-17T22:52:09.913005",
+      "inline": false
     },
     {
       "term_english": "Machine Spirit Scan Protocols",
@@ -6328,7 +6347,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.913113"
+      "created_at": "2026-06-17T22:52:09.913113",
+      "inline": false
     },
     {
       "term_english": "Mark of the Gladiator",
@@ -6372,7 +6392,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.913172"
+      "created_at": "2026-06-17T22:52:09.913172",
+      "inline": false
     },
     {
       "term_english": "Massacre in Scarlet",
@@ -6746,7 +6767,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.913668"
+      "created_at": "2026-06-17T22:52:09.913668",
+      "inline": false
     },
     {
       "term_english": "Muzzle Velocity",
@@ -8572,7 +8594,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.916125"
+      "created_at": "2026-06-17T22:52:09.916125",
+      "inline": false
     },
     {
       "term_english": "Revenge in Crimson",
@@ -8737,7 +8760,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.916343"
+      "created_at": "2026-06-17T22:52:09.916343",
+      "inline": false
     },
     {
       "term_english": "Sanctified Promethium",
@@ -9441,7 +9465,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.917280"
+      "created_at": "2026-06-17T22:52:09.917280",
+      "inline": false
     },
     {
       "term_english": "Spry",
@@ -9859,7 +9884,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.917856"
+      "created_at": "2026-06-17T22:52:09.917856",
+      "inline": false
     },
     {
       "term_english": "Sweeping Motions",
@@ -11201,7 +11227,8 @@
       "context": "WH40K Wiki — talent",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.919708"
+      "created_at": "2026-06-17T22:52:09.919708",
+      "inline": false
     },
     {
       "term_english": "Words of Endurance",
@@ -11960,7 +11987,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.920755"
+      "created_at": "2026-06-17T22:52:09.920755",
+      "inline": false
     },
     {
       "term_english": "Claim the Bounty",
@@ -11993,7 +12021,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.920800"
+      "created_at": "2026-06-17T22:52:09.920800",
+      "inline": false
     },
     {
       "term_english": "Combat Locus Stratagem",
@@ -12015,7 +12044,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.920829"
+      "created_at": "2026-06-17T22:52:09.920829",
+      "inline": false
     },
     {
       "term_english": "Complete the Cycle",
@@ -12136,7 +12166,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.921015"
+      "created_at": "2026-06-17T22:52:09.921015",
+      "inline": false
     },
     {
       "term_english": "Death From Above",
@@ -12257,7 +12288,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.921180"
+      "created_at": "2026-06-17T22:52:09.921180",
+      "inline": false
     },
     {
       "term_english": "Enfeeble",
@@ -12664,7 +12696,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.921734"
+      "created_at": "2026-06-17T22:52:09.921734",
+      "inline": false
     },
     {
       "term_english": "Immolate the Soul",
@@ -12785,7 +12818,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.921898"
+      "created_at": "2026-06-17T22:52:09.921898",
+      "inline": false
     },
     {
       "term_english": "Intimidation",
@@ -12873,7 +12907,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.922018"
+      "created_at": "2026-06-17T22:52:09.922018",
+      "inline": false
     },
     {
       "term_english": "Killing Edge",
@@ -13423,7 +13458,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.922768"
+      "created_at": "2026-06-17T22:52:09.922768",
+      "inline": false
     },
     {
       "term_english": "Raining Blood",
@@ -13478,7 +13514,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.922843"
+      "created_at": "2026-06-17T22:52:09.922843",
+      "inline": false
     },
     {
       "term_english": "Rebound (Perils of the Warp)",
@@ -13731,7 +13768,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.923186"
+      "created_at": "2026-06-17T22:52:09.923186",
+      "inline": false
     },
     {
       "term_english": "Spot of Apathy",
@@ -13753,7 +13791,8 @@
       "context": "WH40K Wiki — ability",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.923215"
+      "created_at": "2026-06-17T22:52:09.923215",
+      "inline": false
     },
     {
       "term_english": "Stalwart Defence",
@@ -19121,7 +19160,8 @@
       "context": "WH40K Wiki — accessory",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.930816"
+      "created_at": "2026-06-17T22:52:09.930816",
+      "inline": false
     },
     {
       "term_english": "Voidborn's Pride",
@@ -21662,7 +21702,8 @@
       "context": "WH40K Wiki — pet_protocol",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.934264"
+      "created_at": "2026-06-17T22:52:09.934264",
+      "inline": false
     },
     {
       "term_english": "Claustrophobia",
@@ -22564,7 +22605,8 @@
       "context": "WH40K Wiki — consumable",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.935563"
+      "created_at": "2026-06-17T22:52:09.935563",
+      "inline": false
     },
     {
       "term_english": "Flashbang",
@@ -22927,7 +22969,8 @@
       "context": "WH40K Wiki — consumable",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.936066"
+      "created_at": "2026-06-17T22:52:09.936066",
+      "inline": false
     },
     {
       "term_english": "Ossificator",
@@ -23675,7 +23718,8 @@
       "context": "WH40K Wiki — weapon",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.937080"
+      "created_at": "2026-06-17T22:52:09.937080",
+      "inline": false
     },
     {
       "term_english": "Balanced Maul",
@@ -24115,7 +24159,8 @@
       "context": "WH40K Wiki — weapon",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.937676"
+      "created_at": "2026-06-17T22:52:09.937676",
+      "inline": false
     },
     {
       "term_english": "Carnivorous Blade",
@@ -24511,7 +24556,8 @@
       "context": "WH40K Wiki — weapon",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.938217"
+      "created_at": "2026-06-17T22:52:09.938217",
+      "inline": false
     },
     {
       "term_english": "Desolation Blast Pistol",
@@ -25787,7 +25833,8 @@
       "context": "WH40K Wiki — weapon",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.939932"
+      "created_at": "2026-06-17T22:52:09.939932",
+      "inline": false
     },
     {
       "term_english": "Knife 1",
@@ -27525,7 +27572,8 @@
       "context": "WH40K Wiki — weapon",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.942343"
+      "created_at": "2026-06-17T22:52:09.942343",
+      "inline": false
     },
     {
       "term_english": "Saint Katherine's Adulation",
@@ -27756,7 +27804,8 @@
       "context": "WH40K Wiki — weapon",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.942654"
+      "created_at": "2026-06-17T22:52:09.942654",
+      "inline": false
     },
     {
       "term_english": "Shield of Unfaltering Will",
@@ -28438,7 +28487,8 @@
       "context": "WH40K Wiki — weapon",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.943578"
+      "created_at": "2026-06-17T22:52:09.943578",
+      "inline": false
     },
     {
       "term_english": "Sword of Faith (Weapon)",
@@ -28834,7 +28884,8 @@
       "context": "WH40K Wiki — weapon",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.944104"
+      "created_at": "2026-06-17T22:52:09.944104",
+      "inline": false
     },
     {
       "term_english": "Undertaker",
@@ -29318,7 +29369,8 @@
       "context": "WH40K Wiki — archetype",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.944742"
+      "created_at": "2026-06-17T22:52:09.944742",
+      "inline": false
     },
     {
       "term_english": "Operative",
@@ -29329,7 +29381,8 @@
       "context": "WH40K Wiki — archetype",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.944756"
+      "created_at": "2026-06-17T22:52:09.944756",
+      "inline": false
     },
     {
       "term_english": "Soldier",
@@ -29340,7 +29393,8 @@
       "context": "WH40K Wiki — archetype",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.944771"
+      "created_at": "2026-06-17T22:52:09.944771",
+      "inline": false
     },
     {
       "term_english": "Warrior",
@@ -29351,7 +29405,8 @@
       "context": "WH40K Wiki — archetype",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.944786"
+      "created_at": "2026-06-17T22:52:09.944786",
+      "inline": false
     },
     {
       "term_english": "Arch-Militant",
@@ -29373,7 +29428,8 @@
       "context": "WH40K Wiki — archetype",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.944814"
+      "created_at": "2026-06-17T22:52:09.944814",
+      "inline": false
     },
     {
       "term_english": "Bounty Hunter",
@@ -29395,7 +29451,8 @@
       "context": "WH40K Wiki — archetype",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.944842"
+      "created_at": "2026-06-17T22:52:09.944842",
+      "inline": false
     },
     {
       "term_english": "Grand Strategist",
@@ -29428,7 +29485,8 @@
       "context": "WH40K Wiki — archetype",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.944884"
+      "created_at": "2026-06-17T22:52:09.944884",
+      "inline": false
     },
     {
       "term_english": "Vanguard",
@@ -29439,7 +29497,8 @@
       "context": "WH40K Wiki — archetype",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.944898"
+      "created_at": "2026-06-17T22:52:09.944898",
+      "inline": false
     },
     {
       "term_english": "Exemplar",
@@ -29527,7 +29586,8 @@
       "context": "WH40K Wiki — origin",
       "confidence": "medium",
       "usage_count": 1,
-      "created_at": "2026-06-17T22:52:09.945048"
+      "created_at": "2026-06-17T22:52:09.945048",
+      "inline": false
     },
     {
       "term_english": "Sanctioned Psyker",

@@ -74,7 +74,7 @@ def main():
     corr_strings = correcoes.get("strings", {})
 
     if not corr_strings:
-        print("❌ Arquivo de correcoes vazio ou sem chave 'strings'")
+        print("[ERR] Arquivo de correcoes vazio ou sem chave 'strings'")
         return 1
 
     # ─── DETECTA ARQUIVO DO VALIDADOR NAO RE-TRADUZIDO ───
@@ -88,12 +88,12 @@ def main():
 
     if validator_total > 0 and validator_untranslated == validator_total:
         print("\n" + "!" * 60)
-        print("  ⚠️  ARQUIVO DO VALIDADOR DETECTADO — NAO FOI RE-TRADUZIDO!")
+        print("  [WARN]  ARQUIVO DO VALIDADOR DETECTADO — NAO FOI RE-TRADUZIDO!")
         print("!" * 60)
         print(f"\n  O arquivo '{args.correcoes}' parece ser saida do validador.")
         print(f"  Todos os {validator_total} itens ainda estao em ingles.")
-        print("\n  ❌ O merge NAO pode ser feito direto.")
-        print("\n  ✅ Fluxo correto:")
+        print("\n  [ERR] O merge NAO pode ser feito direto.")
+        print("\n  [OK] Fluxo correto:")
         print("     1. python validador.py -i en.json -t pt.json -o problemas.json")
         print("     2. python tradutor_game_json.py -i problemas.json -o fix.json --glossary g.json --extract-every 0")
         print("     3. python merge.py -b pt.json -c fix.json -o pt.json")
@@ -101,7 +101,7 @@ def main():
         return 1
 
     if validator_total > 0 and validator_untranslated > 0:
-        print(f"\n⚠️  Aviso: {validator_untranslated}/{validator_total} itens do validador parecem nao ter sido re-traduzidos.")
+        print(f"\n[WARN]  Aviso: {validator_untranslated}/{validator_total} itens do validador parecem nao ter sido re-traduzidos.")
         print("    Estes itens serao ignorados no merge.")
         print()
 
@@ -117,7 +117,7 @@ def main():
 
         # Pula itens vazios (erro de traducao)
         if not corr_text or not corr_text.strip():
-            detalhes.append(f"  ⚠️  {key[:8]}...: correcao VAZIA, pulando")
+            detalhes.append(f"  [WARN]  {key[:8]}...: correcao VAZIA, pulando")
             inalterados += 1
             continue
 
@@ -143,7 +143,7 @@ def main():
 
             alterados += 1
             issue = corr_item.get("_issue", "correcao")
-            detalhes.append(f"  ✅ {key[:8]}... [{issue}]")
+            detalhes.append(f"  [OK] {key[:8]}... [{issue}]")
             detalhes.append(f"     ANT: {base_text[:70]}")
             detalhes.append(f"     NOV: {corr_text[:70]}")
         else:
@@ -178,7 +178,7 @@ def main():
             print(d)
 
     if args.dry_run:
-        print(f"\n⚠️  DRY-RUN — nenhum arquivo foi alterado.")
+        print(f"\n[WARN]  DRY-RUN — nenhum arquivo foi alterado.")
         return 0
 
     # Backup
@@ -191,7 +191,7 @@ def main():
     # Salva
     base["strings"] = base_strings
     save_json(base, args.output)
-    print(f"\n✅ Arquivo salvo: {args.output}")
+    print(f"\n[OK] Arquivo salvo: {args.output}")
     return 0
 
 
