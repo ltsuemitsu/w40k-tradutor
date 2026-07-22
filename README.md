@@ -18,36 +18,67 @@ desktop GUI ("Grimdark Edition").
 
 ## Features
 
-- **Glossary-aware translation** — lore terms (talents, abilities, weapons,
-  factions, homeworlds…) are preserved or translated consistently, driven by a
-  curated JSON glossary with per-term `preserve` flags.
-- **Cost control** — free pre-scan classifies all ~77k strings *before* any API
-  call (EULA / placeholders / already-translated / preserved), plus a budget
-  estimator, blacklists, and length-tiered batching.
+- **Dual-track output** — **Preserved** (EN mechanics + PT narrative) and **Full**
+  (100% PT via free glossary replace / Fullize).
+- **Smart preserve** — exact whole-string wiki terms stay EN; terms *inside*
+  phrases are hard-locked (`§TERM§`) while the sentence still translates.
+- **Hard tech protect** — Encyclopedia, `{g|…}`, `{mf|…}`, `{name}`, binds,
+  sprites, indent… never reach the LLM.
+- **Cost control** — free pre-scan, empty/placeholder/EULA skip, budget
+  estimator, blacklists, length-tiered batching (short×50 … xlong×5).
 - **Crash-safe** — atomic save after every batch; `--resume` continues exactly
   where a run stopped.
 - **Game-update workflow** — free EN↔EN patch diff produces a delta file with
-  only new/changed strings, so a game patch never costs a full retranslation.
-- **Tag protection** — game markup (`{g|…}`, `<color>`, `<sprite>`, `<link>`…)
-  is shielded with placeholders before the LLM call and restored after.
-- **Desktop GUI** — 4 tabs (Translate / Glossary / Update / Wiki), project
-  files (`.w40k`), prescan + blacklist builder, AI glossary population.
+  only new/changed strings.
+- **Desktop GUI** — guided dual-track buttons, glossary editor, update + merge.
+
+## Dual-track recipe (recommended)
+
+### GUI
+1. Open `launch_gui.bat` → Translate tab  
+2. **Pre-Scan** (free)  
+3. Paths: Input EN · Output Preserved · Output Full · Glossary  
+4. Preserve ON → **1) Start Preserve Translation**  
+5. **2) Fullize → 100% PT (FREE)**
+
+### CLI
+```bash
+# 1) Preserved master (API)
+python tradutor.py -i data/en/enGB_new.json -o data/pt/ptBR_preserved.json \
+  -g glossary.json --mode preserve --resume --preserve-map preserve_map.json
+
+# 2) Full master (FREE — no API)
+python tradutor.py --fullize \
+  -i data/pt/ptBR_preserved.json -o data/pt/ptBR_full.json -g glossary.json
+
+# Dry-run classify + protect only
+python tradutor.py -i data/en/enGB_new.json -o data/pt/_dry.json \
+  -g glossary.json --mode preserve --dry-run
+```
+
+### What each string does in Preserve mode
+| Kind | Action |
+|---|---|
+| empty / placeholder | skip (free) |
+| EULA / huge legal | skip (free) |
+| exact wiki term | copy EN (free) |
+| term inside phrase | translate + hard-lock term |
+| clean narrative | normal PT translate |
 
 ## Repository layout
 
 | File | Role |
 |---|---|
-| `tradutor.py` | Core translation engine + CLI (all translation happens here) |
-| `tradutor_desktop.py` | PySide6 desktop GUI (drives the CLIs) |
-| `diff_tool.py` | Audit translations, diff game patches, smart glossary-aware diff |
-| `merge.py` | Merge correction/retranslation files into the main output (backup + dry-run) |
+| `tradutor.py` | Core engine + CLI (`--mode preserve`, `--fullize`, smart batches) |
+| `tradutor_desktop.py` | PySide6 GUI (drives the CLIs) |
+| `diff_tool.py` | Audit translations, diff game patches |
+| `merge.py` | Merge correction/retranslation files into a base PT |
 | `glossary_manager.py` | Interactive CLI glossary editor |
 | `wiki_sync.py` | Glossary seeder (loads offline wiki term lists) |
 | `data/glossaries/wiki_terms.json` | Offline wiki terms (~2,694 in 16 categories) |
-| `glossary.json` | Community glossary (~2,694 terms, EN→PT-BR) — ready to use |
-| `data/glossaries/glossary_seed.json` | Hand-written seed terms |
-| `launch_gui.bat` / `launch_gui.ps1` | Windows launchers (auto-setup venv + deps) |
-| `SCENARIOS.md` | Design contract: the 4 core workflows |
+| `glossary.json` | Community glossary (~2,694 terms, EN→PT-BR) |
+| `launch_gui.bat` / `launch_gui.ps1` | Windows launchers |
+| `SCENARIOS.md` | Design contract: core workflows |
 
 ## Requirements
 
@@ -66,9 +97,8 @@ export DEEPSEEK_API_KEY=sk-...       # Linux/macOS
 set DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-The GUI also lets you paste keys per-provider in Settings. Prefer **Save to
-keychain** (OS Credential Manager via `keyring`); falls back to plain
-QSettings only if `keyring` is missing.
+The GUI also lets you paste keys per-provider. Prefer **Save to keychain**
+(OS Credential Manager via `keyring`).
 
 ## Quick start
 
@@ -79,44 +109,28 @@ localization JSON into `data/en/` (see `data/en/README.txt`). These files are
 **2. (First time) Seed/refresh the glossary:**
 
 ```bash
-python wiki_sync.py --sync        # populate glossary with wiki terms
+python wiki_sync.py --glossary glossary.json --sync
 ```
 
-**3. Translate (CLI):**
+**3. Dual-track translate** — see recipe above (GUI or CLI).
 
-```bash
-# Full translation
-python tradutor.py data/en/enGB.json data/pt/ptBR.json --mode complete
-
-# Recommended: preserve lore terms per the glossary flags
-python tradutor.py data/en/enGB.json data/pt/ptBR.json --mode preserve
-
-# Dry run to see what would be sent to the API (free)
-python tradutor.py data/en/enGB.json data/pt/ptBR.json --dry-run
-```
-
-**4. Or use the GUI:**
-
-```bash
-launch_gui.bat        # Windows (auto-creates venv on first run)
-python tradutor_desktop.py
-```
-
-**5. After a game patch (free diff, then translate only the delta):**
+**4. After a game patch (free diff, then translate only the delta):**
 
 ```bash
 python diff_tool.py update data/en/enGB_old.json data/en/enGB_new.json --out delta.json
-python tradutor.py delta.json data/pt/ptBR_patch.json --mode preserve
-python merge.py data/pt/ptBR.json data/pt/ptBR_patch.json
+python tradutor.py -i delta.json -o data/pt/delta_preserved.json -g glossary.json --mode preserve
+python tradutor.py --fullize -i data/pt/delta_preserved.json -o data/pt/delta_full.json -g glossary.json
+python merge.py -b data/pt/ptBR_preserved.json data/pt/delta_preserved.json -o data/pt/ptBR_preserved.json --backup
+python merge.py -b data/pt/ptBR_full.json data/pt/delta_full.json -o data/pt/ptBR_full.json --backup
 ```
 
-**6. Audit quality:**
+**5. Audit quality:**
 
 ```bash
-python diff_tool.py audit data/en/enGB.json data/pt/ptBR.json
+python diff_tool.py audit data/en/enGB.json data/pt/ptBR_preserved.json
 ```
 
-See `SCENARIOS.md` for the four core workflows.
+See `SCENARIOS.md` for broader workflow notes.
 
 ## Development
 

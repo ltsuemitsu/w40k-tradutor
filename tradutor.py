@@ -79,7 +79,7 @@ SKIP_TEXTS = {"placeholder","tbd","todo","n/a","wip","dummy","test","temp","temp
 SYSTEM_PROMPT = """Você é tradutor sênior de jogos Warhammer 40K: Rogue Trader. Traduza do inglês para {lang}.
 
 REGRAS ABSOLUTAS:
-1. Preserve TODOS os placeholders §TAG0§, §TAG1§ etc. NUNCA os traduza, modifique ou remova.
+1. Preserve TODOS os placeholders §TAG0§, §TAG1§, §TERM0§, §TERM1§ etc. NUNCA os traduza, modifique ou remova.
 2. Preserve fórmulas: 1d6, 2d8+5, D100, números e operadores matemáticos.
 3. Preserve abreviações de atributos isoladas: INT, STR, AGI, PER, WIL, FEL, TGH, WPN, BAL.
 4. Preserve nomes próprios de personagens, locais, facções e títulos únicos do lore.
@@ -102,6 +102,7 @@ class SmartGlossary:
         self.entries: Dict[str, dict] = {}  # key=term_english.lower()
         self._preserve_index: Set[str] = set()  # pre-computed lowercase keys for O(1) lookup
         self._preserve_terms_list: List[str] = []  # sorted by length desc for contains matching
+        self._combined_pattern = None
         self._changed = False
         if path and os.path.exists(path):
             self.load()
@@ -153,60 +154,91 @@ class SmartGlossary:
         logger.info(f"Glossário salvo: {len(self.entries)} termos.")
     
     def should_preserve(self, text: str) -> bool:
-        """Verifica se um texto DEVE ficar em inglês (modo preserve)."""
-        return self.should_preserve_with_terms(text)[0]
+        """True only for EXACT whole-string glossary matches (skip LLM, keep EN)."""
+        return self.classify_preserve(text)[0] == "exact"
 
     def should_preserve_with_terms(self, text: str) -> Tuple[bool, List[str]]:
-        """Verifica se um texto deve ser preservado e retorna os termos correspondentes.
+        """Backward-compatible: True if exact OR inline; terms list always returned.
 
-        Respects the explicit 'preserve' flag on glossary entries (wiki terms etc.)
-        in addition to the category whitelist. This makes the flag first-class
-        as requested for the desktop app "Preserve Wiki Terms" toggle.
+        Prefer classify_preserve() for new code — it distinguishes exact vs inline.
+        """
+        kind, terms = self.classify_preserve(text)
+        return kind in ("exact", "inline"), terms
 
-        Matching strategies (in order):
-        1. Exact whole-string match (case-insensitive, hyphens=spaces variant)
-        2. Contains match with word boundaries — the text CONTAINS a wiki term
-           as a distinct word/subphrase (e.g. "Equip Plasma Gun" contains "Plasma Gun")
+    def classify_preserve(self, text: str) -> Tuple[str, List[str]]:
+        """Classify text for preserve mode.
+
+        Returns (kind, terms):
+          - exact  — whole string IS a glossary preserve term → copy EN, no LLM
+          - inline — glossary term(s) embedded in a longer phrase → translate + hard-lock terms
+          - clean  — no glossary preserve terms → normal translation
+
+        Glossary source of truth: preserve:true OR category in preserve_cats
+        (built into _preserve_index / _combined_pattern).
         """
         if self.preserve_mode == "complete":
-            return False, []
+            return "clean", []
 
         text_lower = text.strip().lower()
-        
-        # --- Strategy 1: Fast exact match via pre-computed index ---
+        if not text_lower:
+            return "clean", []
+
+        # --- Exact whole-string match ---
         if text_lower in self._preserve_index:
             entry = self.entries.get(text_lower, {})
-            return True, [entry.get("term_english", text)]
-        
-        # Hyphen/space variant
+            return "exact", [entry.get("term_english", text.strip())]
+
         text_nohyphen = text_lower.replace("-", " ")
         if text_nohyphen != text_lower and text_nohyphen in self._preserve_index:
             entry = self.entries.get(text_nohyphen, {})
-            return True, [entry.get("term_english", text_nohyphen)]
-        
-        # --- Strategy 2: Combined regex contains match (ONE regex search, not 2694) ---
-        if len(text_lower) > 15 and self._combined_pattern is not None:
-            # Find all matching terms in one pass
-            found_terms = set()
-            for m in self._combined_pattern.finditer(text_lower):
-                term_lower = m.group(0).lower()
-                if term_lower in self._preserve_index:
-                    entry = self.entries.get(term_lower, {})
-                    found_terms.add(entry.get("term_english", term_lower))
-                    if len(found_terms) >= 5:
-                        break
-            if found_terms:
-                return True, list(found_terms)
-        
-        return False, []
+            return "exact", [entry.get("term_english", text_nohyphen)]
+
+        # --- Inline: contains one or more glossary terms (all of them) ---
+        if self._combined_pattern is None:
+            return "clean", []
+
+        found_terms: List[str] = []
+        seen = set()
+        for m in self._combined_pattern.finditer(text_lower):
+            term_lower = m.group(0).lower()
+            if term_lower in self._preserve_index and term_lower not in seen:
+                entry = self.entries.get(term_lower, {})
+                # Exact-only terms (polysemes): still EN when whole string, not locked inline
+                if entry.get("inline", True) is False:
+                    continue
+                seen.add(term_lower)
+                found_terms.append(entry.get("term_english", term_lower))
+
+        if found_terms:
+            # longest first — better for TermProtector alternation
+            found_terms.sort(key=len, reverse=True)
+            return "inline", found_terms
+
+        return "clean", []
+
+    def en_to_pt_map(self) -> Dict[str, str]:
+        """EN (original case from glossary) → PT for free fullize replace."""
+        out: Dict[str, str] = {}
+        for entry in self.entries.values():
+            en = (entry.get("term_english") or "").strip()
+            pt = (entry.get("term_translated") or "").strip()
+            if not en or not pt:
+                continue
+            # Only entries that participate in preserve index
+            if en.lower() not in self._preserve_index:
+                continue
+            out[en] = pt
+        return out
 
     def format_for_prompt(self) -> str:
         """Formata entradas para o system prompt (consistência)."""
         if not self.entries:
             return ""
         lines = ["\n\nGLOSSÁRIO ATIVO (termos estabelecidos — SIGA):"]
-        for entry in sorted(self.entries.values(), key=lambda x: -x.get("usage_count",1))[:50]:
-            lines.append(f'- "{entry["term_english"]}" → "{entry.get("term_translated","")}" [{entry.get("category","")}]')
+        for entry in sorted(self.entries.values(), key=lambda x: -x.get("usage_count", 1))[:50]:
+            lines.append(
+                f'- "{entry["term_english"]}" → "{entry.get("term_translated","")}" [{entry.get("category","")}]'
+            )
         return "\n".join(lines)
 
     def format_translation_guide(self, max_terms: int = 100) -> str:
@@ -260,60 +292,203 @@ class SmartGlossary:
         return added
 
 
-# ─── PROTEÇÃO DE TAGS ───
+# ─── PROTEÇÃO DE TAGS (HARD — byte-stable tech markup) ───
 
 class TagProtector:
-    TAG_PATTERNS = [
-        (r'(\{g\|[^}]+\})([^\{]*)(\{/g\})', 'g_tag'),
-        (r'(\{n\})([^\{]*)(\{/n\})', 'n_tag'),
-        (r'(\{i\})([^\{]*)(\{/i\})', 'i_tag'),
-        (r'(\{b\})([^\{]*)(\{/b\})', 'b_tag'),
-        (r'(\{u\})([^\{]*)(\{/u\})', 'u_tag'),
-        (r'(<color=[^>]+>)([^<]*)(</color>)', 'color_tag'),
-        (r'(<b>)([^<]*)(</b>)', 'html_b'),
-        (r'(<i>)([^<]*)(</i>)', 'html_i'),
-        (r'(<u>)([^<]*)(</u>)', 'html_u'),
-        (r'(<link=[^>]+>)([^<]*)(</link>)', 'link_tag'),
+    """Shield game markup from the LLM via §TAGn§ placeholders.
+
+    Layers:
+      1) known paired tags → protect open/close, leave human content visible
+      2) known whole tokens (gender, binds, placeholders, sprites…)
+      3) blanket leftover ``{…}`` and residual HTML-ish tags
+      4) escaped quotes
+    """
+
+    # (open)(content)(close) — content stays visible for translation
+    PAIRED = [
+        (r"(\{g\|[^}]+\})([^{]*)(\{/g\})", "g_tag"),
+        (r"(\{d\|[^}]+\})([^{]*)(\{/d\})", "d_tag"),
+        (r"(\{n\})([^{]*)(\{/n\})", "n_tag"),
+        (r"(\{i\})([^{]*)(\{/i\})", "i_tag"),
+        (r"(\{b\})([^{]*)(\{/b\})", "b_tag"),
+        (r"(\{u\})([^{]*)(\{/u\})", "u_tag"),
+        (r"(<color=[^>]+>)([^<]*)(</color>)", "color_tag"),
+        (r"(<b>)([^<]*)(</b>)", "html_b"),
+        (r"(<i>)([^<]*)(</i>)", "html_i"),
+        (r"(<u>)([^<]*)(</u>)", "html_u"),
+        (r"(<link=[^>]+>)([^<]*)(</link>)", "link_tag"),
+        (r"(<indent[^>]*>)(.*?)(</indent>)", "indent_tag"),
+        (r"(<nobr>)(.*?)(</nobr>)", "nobr_tag"),
+        (r"(<uppercase>)(.*?)(</uppercase>)", "uppercase_tag"),
+        (r"(<align[^>]*>)(.*?)(</align>)", "align_tag"),
     ]
-    SELFCLOSING = [r'<sprite=[^>]+>', r'<size=[^>]+>', r'</size>', r'\{\{.*?\}\}']
-    
+
+    # Entire match → one placeholder. Specific pipes before blanket \{[^{}]+\}
+    WHOLE = [
+        r"\{mf\|[^}]+\}",
+        r"\{rt_mf\|[^}]+\}",
+        r"\{bind\|[^}]+\}",
+        r"\{mouse_icon\|[^}]+\}",
+        r"\{console_bind\|[^}]+\}",
+        r"\{unit_stat\|[^}]+\}",
+        r"\{uip\|[^}]+\}",
+        r"\{console_icon\|[^}]+\}",
+        r"\{pc_bind\|[^}]+\}",
+        r"\{\{[^{}]*\}\}",
+        r"\{[^{}]+\}",  # {name}, {0}, {br}, orphans…
+        r"<sprite\b[^>]*/?>",
+        r"<size\b[^>]*>",
+        r"</size>",
+        r"<alpha\b[^>]*>",
+        r"<br\s*/?>",
+        r"</?[A-Za-z][^>]*>",  # residual HTML
+    ]
+
     @staticmethod
-    def protect(text: str) -> Tuple[str, Dict[str,str]]:
+    def protect(text: str) -> Tuple[str, Dict[str, str]]:
         if not text:
             return text, {}
-        ph: Dict[str,str] = {}
+        ph: Dict[str, str] = {}
         counter = [0]
-        def _ph():
-            p = f"§TAG{counter[0]}§"; counter[0] += 1; return p
-        
+
+        def _ph() -> str:
+            p = f"§TAG{counter[0]}§"
+            counter[0] += 1
+            return p
+
         result = text
-        for pattern in TagProtector.SELFCLOSING:
-            def make_sc():
-                def repl(m): p = _ph(); ph[p] = m.group(0); return p
-                return repl
-            result = re.sub(pattern, make_sc(), result)
-        
-        for pattern, _ in TagProtector.TAG_PATTERNS:
-            def make_repl():
+
+        for pattern, _ in TagProtector.PAIRED:
+            def make_paired():
                 def repl(m):
-                    po = _ph(); pc = _ph()
-                    ph[po] = m.group(1); ph[pc] = m.group(3)
+                    po, pc = _ph(), _ph()
+                    ph[po] = m.group(1)
+                    ph[pc] = m.group(3)
                     return f"{po}{m.group(2)}{pc}"
                 return repl
-            result = re.sub(pattern, make_repl(), result)
-        
-        def quote_repl(m): p = _ph(); ph[p] = m.group(0); return p
+            result = re.sub(pattern, make_paired(), result, flags=re.IGNORECASE | re.DOTALL)
+
+        for pattern in TagProtector.WHOLE:
+            def make_whole():
+                def repl(m):
+                    p = _ph()
+                    ph[p] = m.group(0)
+                    return p
+                return repl
+            result = re.sub(pattern, make_whole(), result, flags=re.IGNORECASE)
+
+        def quote_repl(m):
+            p = _ph()
+            ph[p] = m.group(0)
+            return p
         result = re.sub(r'\\"', quote_repl, result)
+
         return result, ph
-    
+
     @staticmethod
-    def restore(text: str, ph: Dict[str,str]) -> str:
+    def restore(text: str, ph: Dict[str, str]) -> str:
         if not text or not ph:
             return text
         result = text
-        for p in sorted(ph.keys(), key=lambda x: int(re.search(r'\d+',x).group()), reverse=True):
+        for p in sorted(ph.keys(), key=lambda x: int(re.search(r"\d+", x).group()), reverse=True):
             result = result.replace(p, ph[p])
         return result
+
+    @staticmethod
+    def leak_scan(text: str) -> List[str]:
+        """Leftover tech-looking tokens after protect (tests/audit)."""
+        protected, _ = TagProtector.protect(text)
+        leaks = []
+        for m in re.finditer(r"\{[^{}]+\}", protected):
+            leaks.append(m.group(0))
+        for m in re.finditer(r"</?[A-Za-z][^>]*>", protected):
+            leaks.append(m.group(0))
+        return leaks
+
+
+class TermProtector:
+    """Hard-lock glossary terms inside a phrase (same idea as TagProtector).
+
+    "Equip a Plasma Gun now." + ["Plasma Gun"]
+
+      → restore → "Equip a Plasma Gun now." after translation of the rest
+    """
+
+    @staticmethod
+    def protect(text: str, terms: List[str]) -> Tuple[str, Dict[str, str]]:
+        if not text or not terms:
+            return text, {}
+        # Longest first so "Plasma Gun" wins over "Gun" if both listed
+        uniq = sorted({t for t in terms if t}, key=len, reverse=True)
+        if not uniq:
+            return text, {}
+        pattern = re.compile(
+            r"\b(?:" + "|".join(re.escape(t) for t in uniq) + r")\b",
+            re.IGNORECASE,
+        )
+        matches = list(pattern.finditer(text))
+        if not matches:
+            return text, {}
+        ph: Dict[str, str] = {}
+        result = text
+        # Replace from the end so offsets stay valid
+        for i, m in enumerate(reversed(matches)):
+            p = f"§TERM{i}§"
+            ph[p] = m.group(0)  # keep original casing from source
+            result = result[: m.start()] + p + result[m.end() :]
+        return result, ph
+
+    @staticmethod
+    def restore(text: str, ph: Dict[str, str]) -> str:
+        return TagProtector.restore(text, ph)
+
+
+def fullize_text(text: str, en_to_pt: Dict[str, str]) -> str:
+    """Free replace: glossary EN terms → term_translated (longest-first, word boundary)."""
+    if not text or not en_to_pt:
+        return text
+    # Longest EN first
+    items = sorted(en_to_pt.items(), key=lambda kv: len(kv[0]), reverse=True)
+    # Skip no-ops (EN == PT) — nothing to do
+    items = [(en, pt) for en, pt in items if en != pt]
+    if not items:
+        return text
+    pattern = re.compile(
+        r"\b(?:" + "|".join(re.escape(en) for en, _ in items) + r")\b",
+        re.IGNORECASE,
+    )
+    lower_map = {en.lower(): pt for en, pt in items}
+
+    def repl(m: re.Match) -> str:
+        return lower_map.get(m.group(0).lower(), m.group(0))
+
+    return pattern.sub(repl, text)
+
+
+def fullize_file(input_path: str, output_path: str, glossary_path: str) -> int:
+    """Build Full track from Preserved track via free glossary replace (no LLM)."""
+    data = load_json(input_path)
+    if not data or "strings" not in data:
+        logger.error("Arquivo inválido para --fullize")
+        return 1
+    glossary = SmartGlossary(glossary_path, preserve_mode="preserve")
+    en_to_pt = glossary.en_to_pt_map()
+    if not en_to_pt:
+        logger.warning("Nenhum par EN→PT no glossário para fullize.")
+    changed = 0
+    for key, val in data["strings"].items():
+        if not isinstance(val, dict):
+            continue
+        old = val.get("Text", "")
+        new = fullize_text(old, en_to_pt)
+        if new != old:
+            val["Text"] = new
+            val.pop("_preserved", None)
+            val["_fullized"] = True
+            changed += 1
+    atomic_save(data, output_path)
+    logger.info(f"Fullize: {changed} strings altered | out={output_path} | glossary pairs={len(en_to_pt)}")
+    return 0
 
 
 # ─── ENGINE DE TRADUÇÃO ───
@@ -343,7 +518,7 @@ class TranslationEngine:
         if not self._ensure_client() or not texts:
             return None
         
-        user = f"Traduza cada string para {DEFAULT_TARGET_LANGUAGE}. Preserve §TAGx§.{user_extra}\n\n```json\n{json.dumps(texts, ensure_ascii=False)}\n```"
+        user = f"Traduza cada string para {DEFAULT_TARGET_LANGUAGE}. Preserve §TAGx§ and §TERMx§ placeholders unchanged.{user_extra}\n\n```json\n{json.dumps(texts, ensure_ascii=False)}\n```"
         
         for attempt in range(DEFAULT_MAX_RETRIES):
             try:
@@ -509,11 +684,45 @@ def load_blacklist(path: Optional[str]) -> Set[str]:
 
 
 def should_skip(text: str) -> bool:
+    """Empty / placeholder junk — never send to LLM."""
     if not text or not text.strip():
         return True
     clean = text.strip().lower()
     clean = re.sub(r'^[\[\{<\(]+|[\]\}>\)]+$', '', clean)
     return clean in SKIP_TEXTS
+
+
+EULA_KEYWORDS = (
+    "eula", "end user license", "license agreement",
+    "terms of service", "privacy policy", "copyright",
+    "registered trademark", "all rights reserved",
+)
+
+
+def is_eula(text: str) -> bool:
+    """True EULA/legal walls only — not normal RPG narrative.
+
+    Thresholds (same as GUI Pre-Scan):
+      - >15000 chars → EULA
+      - >3000 chars and >2000 words → EULA
+      - >3000 chars, keyword hit, and >500 words → EULA
+    """
+    if not text:
+        return False
+    n = len(text)
+    if n > 15000:
+        return True
+    if n <= 3000:
+        return False
+    words = text.split()
+    wc = len(words)
+    if wc > 2000:
+        return True
+    lower = text.lower()
+    if wc > 500 and any(kw in lower for kw in EULA_KEYWORDS):
+        return True
+    return False
+
 
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
@@ -548,33 +757,33 @@ def get_engine(model, temp):
 
 def process_batch(batch: List[Tuple[str,dict]], system_prompt: str, model: str, temp: float, dry_run: bool):
     try:
-        keys = [k for k,_ in batch]
-        originals = [v["Text"] for _,v in batch]
-        offsets = [v.get("Offset",0) for _,v in batch]
+        keys = [k for k, _ in batch]
+        originals = [v["Text"] for _, v in batch]
+        offsets = [v.get("Offset", 0) for _, v in batch]
 
-        protect_results = [TagProtector.protect(t) for t in originals]
-        protected = [r[0] for r in protect_results]
-        ph_list = [r[1] for r in protect_results]
-
-        # Support for partial preserve from preserve_map (for full translation on mixed strings)
-        user_extra = ""
-        for k, v in batch:
-            if "_preserve_these" in v:
-                phrases = v["_preserve_these"]
-                user_extra += f"\nFor the string corresponding to key {k}, preserve these exact phrases inside the text (do not translate or change them): {', '.join(phrases)}."
+        # 1) game tags  2) glossary terms (inline preserve)
+        protected: List[str] = []
+        ph_list: List[Dict[str, str]] = []
+        for (_, v), original in zip(batch, originals):
+            t, ph = TagProtector.protect(original)
+            terms = v.get("_preserve_terms") or []
+            if terms:
+                t, tph = TermProtector.protect(t, terms)
+                ph.update(tph)
+            protected.append(t)
+            ph_list.append(ph)
 
         if dry_run:
             translated = protected
         else:
             engine = get_engine(model, temp)
-            # pass extra instruction if any
-            translated = engine.translate_batch(protected, system_prompt, keys, user_extra=user_extra)
+            translated = engine.translate_batch(protected, system_prompt, keys, user_extra="")
 
         if translated is None:
             return None
 
-        data: Dict[str,dict] = {}
-        for i,key in enumerate(keys):
+        data: Dict[str, dict] = {}
+        for i, key in enumerate(keys):
             restored = TagProtector.restore(translated[i], ph_list[i])
             data[key] = {"Offset": offsets[i], "Text": restored}
         return data
@@ -591,7 +800,7 @@ def main():
     parser.add_argument("-o","--output", required=True, help="Arquivo de saída")
     parser.add_argument("-g","--glossary", help="Glossário JSON")
     parser.add_argument("--mode", choices=["complete","preserve"], default="complete",
-                        help="complete=traduz tudo | preserve=preserva mecânicas")
+                        help="complete=traduz tudo | preserve=exact EN + inline term lock")
     parser.add_argument("--preserve-cats", default=DEFAULT_PRESERVE_CATS_CSV,
                         help="Categorias do glossário a preservar (modo preserve)")
     parser.add_argument("--resume", action="store_true")
@@ -601,9 +810,11 @@ def main():
     parser.add_argument("--extract-every", type=int, default=0)
     parser.add_argument("--blacklist", help="JSON com lista de UUIDs (ou dict) para pular na tradução")
     parser.add_argument("--preserve-map", dest="preserve_map", default="preserve_map.json",
-                        help="Arquivo JSON onde gravar o mapeamento UUID -> termos preservados (modo preserve)")
+                        help="UUID → {kind, terms} map written in preserve mode")
     parser.add_argument("--retranslate-map", dest="retranslate_map",
-                        help="JSON com UUIDs a retraduzir (gerado por --preserve-map). Usa modo complete.")
+                        help="JSON com UUIDs a retraduzir (legado). Prefira --fullize para track Full.")
+    parser.add_argument("--fullize", action="store_true",
+                        help="Free EN→PT glossary replace (no LLM). Input=preserved PT, output=full PT.")
     parser.add_argument("--auto-glossary", action="store_true",
                         help="Forca extracao de termos para o glossario mesmo em dry-run (usado pelo botao Populate Glossary)")
     parser.add_argument("--dry-run", action="store_true")
@@ -611,16 +822,24 @@ def main():
     parser.add_argument("--model", default="deepseek-chat")
     parser.add_argument("--prescan-cache", dest="prescan_cache", default="prescan_cache.json",
                         help="JSON cache from Pre-Scan (skips re-classification of preserved/skip/eula UUIDs)")
-    parser.add_argument("--optimized-batch", action="store_true",
-                        help="Use maximum smart batch sizes (50/30/12/5) regardless of --batch-size. "
-                             "Short strings get big batches (less API overhead), long strings get small batches (avoid token overflow).")
+    parser.add_argument("--optimized-batch", action="store_true", default=True,
+                        help="Smart tier batch sizes (short=50, med=30, long=12, xlong=5). On by default.")
+    parser.add_argument("--no-optimized-batch", action="store_false", dest="optimized_batch",
+                        help="Disable smart tier sizes; derive from --batch-size only.")
     args = parser.parse_args()
-
-    # Console feedback: show the active configuration immediately
-    logger.info(f"Config: model={args.model} | mode={args.mode} | batch={args.batch_size} | workers={args.workers} | temp={args.temperature} | dry_run={args.dry_run}")
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # Free fullize path (no LLM)
+    if args.fullize:
+        if not args.glossary:
+            logger.error("--fullize requires -g/--glossary")
+            return 1
+        return fullize_file(args.input, args.output, args.glossary)
+
+    # Console feedback: show the active configuration immediately
+    logger.info(f"Config: model={args.model} | mode={args.mode} | batch={args.batch_size} | workers={args.workers} | temp={args.temperature} | dry_run={args.dry_run}")
 
     # ── CARREGA ──
     input_data = load_json(args.input)
@@ -672,11 +891,18 @@ def main():
                 rmap = json.load(f)
             if isinstance(rmap, dict):
                 retranslate_keys = set(rmap.keys())
-                retranslate_terms = {k: (v if isinstance(v, list) else [str(v)]) for k, v in rmap.items()}
+                retranslate_terms = {}
+                for k, v in rmap.items():
+                    if isinstance(v, list):
+                        retranslate_terms[k] = v
+                    elif isinstance(v, dict):
+                        retranslate_terms[k] = list(v.get("terms") or [])
+                    else:
+                        retranslate_terms[k] = [str(v)]
             elif isinstance(rmap, list):
                 retranslate_keys = set(str(x) for x in rmap)
             else:
-                logger.error("--retranslate-map deve ser um dict {uuid: [termos]} ou uma lista de UUIDs")
+                logger.error("--retranslate-map deve ser um dict {uuid: ...} ou uma lista de UUIDs")
                 return 1
             orig_strings = {k: v for k, v in orig_strings.items() if k in retranslate_keys}
             logger.info(f"🔁 Retranslate map: {len(orig_strings)} UUIDs selecionados de {args.retranslate_map}")
@@ -698,14 +924,17 @@ def main():
     # ── CLASSIFICA ──
     pending = []
     skipped = 0
-    preserved = 0
+    preserved_exact = 0
+    preserved_inline = 0
     already_done = 0
-    preserve_map: Dict[str, List[str]] = {}
+    # New shape: uuid → {"kind": "exact"|"inline", "terms": [...]}
+    preserve_map: Dict[str, dict] = {}
     
     for key, value in orig_strings.items():
         text = value.get("Text", "")
         
         # ── PRE-SCAN CACHE (O(1) lookups — skip expensive checks) ──
+        # prescan PRESERVED = exact-only (legacy); treat as exact skip
         if key in prescan_eula:
             translated[key] = {"Offset": value.get("Offset",0), "Text": text, "_skipped": "eula"}
             skipped += 1
@@ -717,9 +946,9 @@ def main():
             continue
         
         if key in prescan_preserved:
-            translated[key] = {"Offset": value.get("Offset",0), "Text": text, "_preserved": True}
-            preserve_map[key] = ["prescan_cache"]
-            preserved += 1
+            translated[key] = {"Offset": value.get("Offset",0), "Text": text, "_preserved": True, "_preserve_kind": "exact"}
+            preserve_map[key] = {"kind": "exact", "terms": ["prescan_cache"]}
+            preserved_exact += 1
             continue
         
         # Blacklist explícita de UUIDs (EULA, termos legais, etc.)
@@ -728,32 +957,51 @@ def main():
             skipped += 1
             continue
         
-        # Placeholder/vazio
+        # Placeholder / vazio — free skip
         if should_skip(text):
             translated[key] = {"Offset": value.get("Offset",0), "Text": text, "_skipped": "placeholder"}
             skipped += 1
             continue
+
+        # EULA / license walls — free skip (no API). Same thresholds as GUI Pre-Scan.
+        if is_eula(text):
+            translated[key] = {"Offset": value.get("Offset",0), "Text": text, "_skipped": "eula"}
+            skipped += 1
+            continue
         
         # Já traduzido (resume)?
-        # If we have a prior non-failed entry for this key, treat it as done.
-        # This prevents re-sending the same strings (and burning budget) on re-runs without --resume.
-        # Note: in preserve mode the stored text for preserved items == original English; we still want to skip re-LLM.
         if key in translated and translated[key].get("Text") and not translated[key].get("_failed"):
             already_done += 1
             continue
         
-        # Preservar (modo preserve + termo do glossário)?
+        # Preserve mode: exact = skip LLM; inline = queue with term locks; clean = normal
         if args.mode == "preserve":
-            is_preserved, preserved_terms = glossary.should_preserve_with_terms(text)
-            if is_preserved:
-                translated[key] = {"Offset": value.get("Offset",0), "Text": text, "_preserved": True}
-                preserve_map[key] = preserved_terms
-                preserved += 1
+            kind, terms = glossary.classify_preserve(text)
+            if kind == "exact":
+                translated[key] = {
+                    "Offset": value.get("Offset", 0),
+                    "Text": text,
+                    "_preserved": True,
+                    "_preserve_kind": "exact",
+                }
+                preserve_map[key] = {"kind": "exact", "terms": terms}
+                preserved_exact += 1
                 continue
-        
+            if kind == "inline":
+                # Copy value and attach terms for TermProtector in process_batch
+                v2 = dict(value)
+                v2["_preserve_terms"] = terms
+                pending.append((key, v2))
+                preserve_map[key] = {"kind": "inline", "terms": terms}
+                preserved_inline += 1
+                continue
+
         pending.append((key, value))
     
-    logger.info(f"Pendentes: {len(pending)} | Preservados: {preserved} | Já feitos: {already_done} | Pulados: {skipped}")
+    logger.info(
+        f"Pendentes: {len(pending)} | Exact EN: {preserved_exact} | "
+        f"Inline locked: {preserved_inline} | Já feitos: {already_done} | Pulados: {skipped}"
+    )
     
     if not pending:
         logger.info("Nada para traduzir!")
@@ -933,7 +1181,10 @@ def main():
         except Exception as e:
             logger.warning(f"Não foi possível salvar preserve_map: {e}")
 
-    logger.info(f"✅ Concluído: {success} traduzidos | {failed} falhas | {preserved} preservados")
+    logger.info(
+        f"✅ Concluído: {success} traduzidos | {failed} falhas | "
+        f"{preserved_exact} exact EN | {preserved_inline} inline locked"
+    )
     logger.info(f"📁 Salvo: {args.output}")
     return 0
 

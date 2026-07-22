@@ -557,37 +557,57 @@ class W40kTranslatorGUI(QMainWindow):
         help_menu = menubar.addMenu("&Help")
         about = QAction("About / Scenarios", self)
         about.triggered.connect(lambda: QMessageBox.information(
-            self, "W40K Tradutor",
-            "Desktop GUI for the W40K Rogue Trader translation toolkit.\n\n"
-            "See SCENARIOS.md for the exact flows this app is built to support.\n\n"
-            "Preserve toggle = Scenario 1 (off) vs Scenario 2 (on)."
-        ))
+                    self, "W40K Tradutor",
+                    "Dual-track EN→PT-BR for Rogue Trader\n\n"
+                    "1) Pre-Scan (free)\n"
+                    "2) Preserve translation → EN mechanics + PT story\n"
+                    "3) Fullize (free) → 100% PT via glossary\n\n"
+                    "Exact wiki terms stay EN; terms inside phrases are hard-locked.\n"
+                    "Tags / Encyclopedia / {name} / {mf|…} never go to the LLM.\n"
+                    "Empty, placeholder, and EULA texts are skipped (no API).\n\n"
+                    "Smart batches: short×50 · medium×30 · long×12 · xlong×5.\n"
+                    "See README.md for CLI recipes."
+                ))
         help_menu.addAction(about)
 
     # ───────────────────────────────
-    # TAB: TRANSLATE (Scenarios 1 & 2)
+    # TAB: TRANSLATE (dual-track: Preserved + Full)
     # ───────────────────────────────
     def _create_translate_tab(self) -> QWidget:
         w = QWidget()
         layout = QVBoxLayout(w)
 
-        # Scenario hint
-        hint = QLabel("Scenario 1 (Full translate) → uncheck Preserve\nScenario 2 (Preserve wiki/mechanics) → check Preserve (recommended for Rogue Trader)")
-        hint.setStyleSheet("color: #8a7560; font-style: italic;")
-        layout.addWidget(hint)
+        guide = QLabel(
+            "<b>Dual-track workflow (recommended)</b><br>"
+            "<b>1.</b> Pre-Scan (free) → review EULA/skip counts<br>"
+            "<b>2.</b> Preserve ON → <b>Start Translation</b> → <code>ptBR_preserved</code> "
+            "(EN mechanics + PT narrative; hard-locks tags &amp; wiki terms inside phrases)<br>"
+            "<b>3.</b> <b>Fullize</b> (free, no API) → <code>ptBR_full</code> "
+            "(glossary EN→PT replace on the preserved file)<br>"
+            "<span style='color:#8a7560'>Exact whole-string wiki terms stay EN in step 2. "
+            "Empty/placeholder/EULA never hit the API. Smart batches: short×50 · med×30 · long×12 · xlong×5.</span>"
+        )
+        guide.setWordWrap(True)
+        guide.setStyleSheet(
+            "background:#1a1520; border:1px solid #3a3040; border-radius:6px; "
+            "padding:10px; color:#e8dcc8;"
+        )
+        layout.addWidget(guide)
 
         # Files group
         files_g = QGroupBox("Files")
         fl = QVBoxLayout(files_g)
 
         self.tr_input = self._file_row(fl, "Input (English JSON)", "data/en/enGB.json", self._pick_input)
-        self.tr_output = self._file_row(fl, "Output (PT-BR JSON)", "data/pt/ptBR.json", self._pick_output)
+        self.tr_output = self._file_row(fl, "Output — Preserved PT (EN terms + PT story)", "data/pt/ptBR_preserved.json", self._pick_output)
+        self.tr_full_output = self._file_row(fl, "Output — Full PT (100% PT via Fullize)", "data/pt/ptBR_full.json", self._pick_output)
         self.tr_glossary = self._file_row(fl, "Glossary", "glossary.json", self._pick_glossary)
-        self.tr_blacklist = self._file_row(fl, "Blacklist (UUIDs to skip, e.g. EULA)", "data/blacklists/blacklist.json", self._pick_blacklist)
-        self.tr_preserve_map = self._file_row(fl, "Preserve Map (UUID -> terms)", "preserve_map.json", self._pick_preserve_map)
+        self.tr_blacklist = self._file_row(fl, "Blacklist (optional UUIDs)", "data/blacklists/blacklist.json", self._pick_blacklist)
+        self.tr_preserve_map = self._file_row(fl, "Preserve Map (auto from Preserve run)", "preserve_map.json", self._pick_preserve_map)
         self.tr_preserve_map.setToolTip(
-            "Generated during a preserve-mode run. Lists every UUID that had a wiki/mechanic term preserved, "
-            "and which terms were preserved. Used by the second-pass button to retranslate only those strings with localized context."
+            "Written on Preserve runs: {uuid: {kind: exact|inline, terms: [...]}}.\n"
+            "exact = whole string was a wiki term (kept EN).\n"
+            "inline = terms hard-locked inside a translated phrase."
         )
 
         bl_btn = QPushButton("Interactive Blacklist Builder (scan for EULA, long texts, placeholders...)")
@@ -596,25 +616,31 @@ class W40kTranslatorGUI(QMainWindow):
 
         prescan_btn = QPushButton("🔍 Pre-Scan: Classify All UUIDs (FREE — no API cost)")
         prescan_btn.setToolTip(
-            "Classifies every UUID in the source file into 7 categories:\n"
-            "PRESERVED (free), SKIP, SHORT, MEDIUM, LONG, EULA, PENDING.\n"
-            "Shows exact counts + token estimates BEFORE you spend any money."
+            "Free classification before spending money:\n"
+            "• SKIP — empty / placeholder\n"
+            "• EULA — huge legal walls (auto-skipped by engine too)\n"
+            "• PRESERVED — exact glossary term (free EN keep)\n"
+            "• SHORT / MEDIUM / LONG — length tiers for smart batches\n"
+            "Note: inline term locks are applied at translate time (not only exact)."
         )
         prescan_btn.clicked.connect(self._prescan_source)
         fl.addWidget(prescan_btn)
 
         layout.addWidget(files_g)
 
-        # Big Preserve Toggle — the heart of scenarios 1 vs 2
-        preserve_box = QGroupBox()
-        preserve_layout = QHBoxLayout(preserve_box)
-        self.preserve_toggle = QCheckBox("PRESERVE WIKI & CORE MECHANICS TERMS  (Scenario 2 — recommended)")
+        # Big Preserve Toggle
+        preserve_box = QGroupBox("Preserve mode")
+        preserve_layout = QVBoxLayout(preserve_box)
+        self.preserve_toggle = QCheckBox("PRESERVE WIKI & CORE MECHANICS  (recommended — dual-track step 2)")
         self.preserve_toggle.setObjectName("big_toggle_label")
         self.preserve_toggle.setChecked(True)
         self.preserve_toggle.setToolTip(
-            "When ON: exact matches on glossary terms with preserve:true (wiki terms, weapons, talents, skills, attributes, etc.) "
-            "are kept in English and never sent to the LLM. Narrative text is still translated. "
-            "This is the normal desired behavior for Rogue Trader."
+            "ON (recommended):\n"
+            "• EXACT — whole string is a glossary term → keep English, no API\n"
+            "• INLINE — term inside a phrase → translate phrase, hard-lock term as §TERM§\n"
+            "• CLEAN — normal PT translation\n"
+            "• Tags / Encyclopedia / {name} / {mf|…} always hard-protected\n\n"
+            "OFF: full narrative translate (no EN term locks). Use Fullize after Preserve for 100% PT."
         )
         preserve_layout.addWidget(self.preserve_toggle)
         layout.addWidget(preserve_box)
@@ -700,19 +726,37 @@ class W40kTranslatorGUI(QMainWindow):
 
         # Actions
         action_layout = QHBoxLayout()
-        self.translate_btn = QPushButton("▶ START TRANSLATION")
+        self.translate_btn = QPushButton("▶ 1) START PRESERVE TRANSLATION")
         self.translate_btn.setObjectName("primary")
-        self.translate_btn.clicked.connect(self._start_translation)
+        self.translate_btn.setToolTip(
+            "Step 2 of dual-track.\n"
+            "Preserve ON → EN mechanics + PT story → Output Preserved.\n"
+            "Smart batches + EULA/placeholder skip + hard tag protect."
+        )
+        self.translate_btn.clicked.connect(lambda: self._start_translation(optimized=True))
         action_layout.addWidget(self.translate_btn)
 
+        self.fullize_btn = QPushButton("✨ 2) FULLIZE → 100% PT (FREE)")
+        self.fullize_btn.setObjectName("primary")
+        self.fullize_btn.setToolTip(
+            "Step 3 of dual-track — NO API cost.\n"
+            "Reads Output Preserved, replaces glossary EN terms with PT, writes Output Full."
+        )
+        self.fullize_btn.clicked.connect(self._start_fullize)
+        action_layout.addWidget(self.fullize_btn)
+
         self.dryrun_quick_btn = QPushButton("Dry Run (safe test)")
-        self.dryrun_quick_btn.clicked.connect(lambda: (self.dry_run_cb.setChecked(True), self._start_translation()))
+        self.dryrun_quick_btn.setToolTip("No API calls — classify + protect tags/terms only.")
+        self.dryrun_quick_btn.clicked.connect(
+            lambda: (self.dry_run_cb.setChecked(True), self._start_translation(optimized=True))
+        )
         action_layout.addWidget(self.dryrun_quick_btn)
 
-        self.retranslate_btn = QPushButton("🔁 2ND PASS: Retranslate Preserved UUIDs")
+        self.retranslate_btn = QPushButton("🔁 Advanced: LLM 2nd pass (legacy)")
         self.retranslate_btn.setToolTip(
-            "Uses the Preserve Map to translate ONLY the UUIDs that had wiki/mechanic terms preserved. "
-            "Preserve toggle is ignored (full localized translation)."
+            "LEGACY / special cases only.\n"
+            "Prefer Fullize (free) for the Full track.\n"
+            "This re-sends preserved UUIDs to the LLM (costs money)."
         )
         self.retranslate_btn.clicked.connect(self._start_second_pass)
         action_layout.addWidget(self.retranslate_btn)
@@ -1338,9 +1382,13 @@ class W40kTranslatorGUI(QMainWindow):
             f"({len(buckets['SHORT'])} short, {len(buckets['MEDIUM'])} medium, "
             f"{len(buckets['LONG'])} long, {len(buckets['PENDING'])} pending)<br><br>"
             f"Est. API cost: <b>${est_cost}</b> with {model_now}<br>"
-            f"Savings: {preserved_count + skip_count} strings ({(preserved_count + skip_count)/max(total,1)*100:.0f}%) cost ZERO<br>"
-            f"<small>Note: PRESERVED count uses exact match only (instant). "
-            f"Actual translation may preserve additional strings via contains matching.</small>"
+            f"Savings: {preserved_count + skip_count} strings "
+            f"({(preserved_count + skip_count)/max(total,1)*100:.0f}%) cost ZERO "
+            f"(exact EN + empty/placeholder; EULA also free at translate time)<br>"
+            f"<small>PRESERVED here = <b>exact</b> glossary match only. "
+            f"At translate time, terms <b>inside phrases</b> are hard-locked (inline), "
+            f"not skipped as whole English sentences. "
+            f"Engine also auto-skips empty/placeholder/EULA without a blacklist.</small>"
         )
         summary.setWordWrap(True)
         lay.addWidget(summary)
@@ -2497,7 +2545,10 @@ class W40kTranslatorGUI(QMainWindow):
                                         if item.get("Text", "").strip().lower() in g._preserve_index)
                     if preserve_count > 0:
                         pct = round(preserve_count / max(n_items, 1) * 100)
-                        preserve_info = f" | Est. preserved (no API cost): {preserve_count} ({pct}%)"
+                        preserve_info = (
+                            f" | Exact glossary EN (free): ~{preserve_count} ({pct}%) "
+                            f"— plus inline locks at translate time"
+                        )
                 except Exception:
                     pass
 
@@ -2513,7 +2564,10 @@ class W40kTranslatorGUI(QMainWindow):
                     f"• Estimated API cost: ~${est_cost}\n\n"
                 )
                 if preserve_on:
-                    warning_msg += "Preserve is ON — wiki terms will be kept in English (free).\n\n"
+                    warning_msg += (
+                        "Preserve ON — exact wiki terms stay EN (free); "
+                        "phrases with terms still translate with hard locks.\n\n"
+                    )
                 warning_msg += (
                     f"RECOMMENDATION: Switch to a cheaper model to save money:\n"
                     f"• deepseek-v4-flash (fast + cheap, ~10x cheaper)\n"
@@ -2605,7 +2659,7 @@ class W40kTranslatorGUI(QMainWindow):
 
         self._append_log(f"Starting translation: {' '.join(cmd)}")
         self._append_log(f"Model: {model_name}")
-        self._append_log(f"Preserve mode: {'ON (wiki/mechanics protected)' if preserve_on else 'OFF (full translation)'}")
+        self._append_log(f"Preserve mode: {'ON (exact EN + inline term lock)' if preserve_on else 'OFF (full translate)'}")
         self._append_log(f"Provider: {provider} | Base URL effective: {env.get('DEEPSEEK_BASE_URL', '(default)')} | Key: {key_source}")
         if self.tr_blacklist.text().strip():
             cmd += ["--blacklist", self.tr_blacklist.text().strip()]
@@ -2615,25 +2669,69 @@ class W40kTranslatorGUI(QMainWindow):
         if preserve_on:
             cmd += ["--preserve-map", preserve_map_path]
 
-        # Add optimized batch flag if requested — tradutor.py will use maximum
-        # tier sizes (50/30/12/5) regardless of the base batch_size value.
-        if optimized:
+        # Smart batches always on (engine default); flag kept for older tradutor.py)
+        if optimized or True:
             cmd.append("--optimized-batch")
 
-        # Use the improved TranslationWorker
-        # - Live progress + stats + cancel
-        # - Respects interactive blacklist (EULA etc.)
-        # - Can auto-populate glossary during the run if the checkbox is on
-        task_label = "Translation (Optimized)" if optimized else "Translation"
-        self._start_with_worker(cmd, task_label, env)  # will launch via worker + signals
+        task_label = "Preserve Translation" if preserve_on else "Full Translation"
+        if self.dry_run_cb.isChecked():
+            task_label = "Dry Run — " + task_label
+        self._start_with_worker(cmd, task_label, env)
+
+    def _start_fullize(self):
+        """Free Full track: glossary EN→PT replace on the Preserved output (no LLM)."""
+        src = self.tr_output.text().strip()
+        outp = self.tr_full_output.text().strip() if hasattr(self, "tr_full_output") else ""
+        gloss = self.tr_glossary.text().strip() or (
+            self.glossary_path_edit.text().strip() if hasattr(self, "glossary_path_edit") else ""
+        )
+
+        if not src or not os.path.exists(src):
+            QMessageBox.warning(
+                self, "No Preserved file",
+                "Set Output — Preserved PT to an existing preserve-mode result first.\n\n"
+                "Run step 1 (Start Preserve Translation) before Fullize.",
+            )
+            return
+        if not outp:
+            QMessageBox.warning(self, "No Full output path", "Set Output — Full PT path.")
+            return
+        if not gloss or not os.path.exists(gloss):
+            QMessageBox.warning(self, "No glossary", "Glossary is required for Fullize (EN→PT map).")
+            return
+
+        reply = QMessageBox.question(
+            self, "Fullize (FREE — no API)",
+            f"Build 100% PT file from preserved translation?\n\n"
+            f"Input (preserved):\n  {src}\n\n"
+            f"Output (full):\n  {outp}\n\n"
+            f"Glossary:\n  {gloss}\n\n"
+            f"No LLM calls — longest-first word-boundary replace of glossary terms.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        cmd = [
+            sys.executable, "tradutor.py", "--fullize",
+            "-i", src, "-o", outp, "-g", gloss,
+        ]
+        self._append_log(f"Fullize (free): {' '.join(cmd)}")
+        self._start_with_worker(cmd, "Fullize (free EN→PT)", os.environ.copy())
 
     def _start_second_pass(self):
-        """Second pass: translate only the UUIDs that were preserved in a previous preserve run.
+        """LEGACY: LLM retranslate of preserve-map UUIDs. Prefer Fullize for Full track."""
+        tip = QMessageBox.information(
+            self, "Prefer Fullize",
+            "For the Full (100% PT) track, use Fullize — it is free and uses your glossary PT terms.\n\n"
+            "Continue with the paid LLM 2nd pass only if you need model rewriting beyond glossary replace.",
+            QMessageBox.Ok | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if tip != QMessageBox.Ok:
+            return
 
-        Uses --retranslate-map to feed the preserve map into tradutor.py. The preserve toggle
-        is ignored on purpose because this pass is meant to localize the previously-preserved
-        strings with the glossary PT terms as consistency guidance.
-        """
         inp = self.tr_input.text().strip()
         if not inp or not os.path.exists(inp):
             QMessageBox.warning(self, "No input", "Please select a valid Input (English JSON) first.")
@@ -2919,10 +3017,11 @@ class W40kTranslatorGUI(QMainWindow):
         state = {
             "version": "1.0",
             "saved_at": datetime.now().isoformat(),
-            # Translate tab (Scenarios 1 & 2)
+            # Translate tab (dual-track)
             "translate": {
                 "input": safe_text(getattr(self, 'tr_input', None)) or last.get("input", ""),
                 "output": safe_text(getattr(self, 'tr_output', None)) or last.get("output", ""),
+                "full_output": safe_text(getattr(self, 'tr_full_output', None)) or last.get("full_output", ""),
                 "glossary": safe_text(getattr(self, 'tr_glossary', None)) or safe_text(getattr(self, 'glossary_path_edit', None)) or last.get("glossary", ""),
                 "blacklist": safe_text(getattr(self, 'tr_blacklist', None)) if hasattr(self, 'tr_blacklist') else last.get("blacklist", ""),
                 "preserve_map": safe_text(getattr(self, 'tr_preserve_map', None)) if hasattr(self, 'tr_preserve_map') else last.get("preserve_map", ""),
@@ -2961,6 +3060,8 @@ class W40kTranslatorGUI(QMainWindow):
             t = proj.get("translate", {})
             if t.get("input"): self.tr_input.setText(t["input"])
             if t.get("output"): self.tr_output.setText(t["output"])
+            if t.get("full_output") and hasattr(self, "tr_full_output"):
+                self.tr_full_output.setText(t["full_output"])
             if t.get("glossary"):
                 self.tr_glossary.setText(t["glossary"])
                 if hasattr(self, "glossary_path_edit"):
