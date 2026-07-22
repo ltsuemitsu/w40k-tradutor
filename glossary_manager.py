@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gerenciador de Glossário — Ferramenta Interativa
+Gerenciador de Glossario — Ferramenta Interativa
 =================================================
 Permite visualizar, editar, adicionar e remover termos do glossário evolutivo.
 Útil para "corrigir retroactivamente" decisões de tradução entre batches.
@@ -74,7 +74,7 @@ def save_glossary(path: str, data: dict):
     data["metadata"]["total_terms"] = len(data.get("terms", []))
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-    print(f"✅ Glossário salvo: {path} ({data['metadata']['total_terms']} termos)")
+    print(f"[OK] Glossario salvo: {path} ({data['metadata']['total_terms']} termos)")
 
 
 def list_terms(data: dict, category: str = None):
@@ -92,7 +92,7 @@ def list_terms(data: dict, category: str = None):
     for t in terms:
         by_cat[t.get("category", "sem_categoria")].append(t)
     
-    print(f"\n📖 Glossário: {len(terms)} termos\n{'='*60}")
+    print(f"\n Glossario: {len(terms)} termos\n{'='*60}")
     for cat in sorted(by_cat.keys()):
         print(f"\n  [{cat.upper()}] ({len(by_cat[cat])} termos)")
         print(f"  {'-'*50}")
@@ -110,16 +110,16 @@ def add_term_interactive(data: dict):
     
     english = input("Termo em inglês: ").strip()
     if not english:
-        print("❌ Cancelado.")
+        print("[ERR] Cancelado.")
         return
     
     # Verifica se já existe
     existing = next((t for t in data["terms"] if t["term_english"].lower() == english.lower()), None)
     if existing:
-        print(f"⚠️ Termo já existe: \"{existing['term_english']}\" → \"{existing['term_translated']}\"")
+        print(f"[WARN] Termo já existe: \"{existing['term_english']}\" → \"{existing['term_translated']}\"")
         overwrite = input("Sobrescrever? (s/N): ").strip().lower()
         if overwrite != 's':
-            print("❌ Mantido termo existente.")
+            print("[ERR] Mantido termo existente.")
             return
         data["terms"].remove(existing)
     
@@ -148,7 +148,7 @@ def add_term_interactive(data: dict):
         "created_at": datetime.now().isoformat()
     }
     data["terms"].append(entry)
-    print(f"✅ Adicionado: \"{english}\" → \"{translated}\" [{category}]")
+    print(f"[OK] Adicionado: \"{english}\" → \"{translated}\" [{category}]")
 
 
 def search_terms(data: dict, query: str):
@@ -172,7 +172,7 @@ def edit_term(data: dict, term_english: str):
     """Edita um termo existente."""
     term = next((t for t in data["terms"] if t["term_english"].lower() == term_english.lower()), None)
     if not term:
-        print(f"❌ Termo \"{term_english}\" não encontrado.")
+        print(f"[ERR] Termo \"{term_english}\" não encontrado.")
         # Sugere busca
         matches = [t for t in data["terms"] if term_english.lower() in t["term_english"].lower()]
         if matches:
@@ -200,7 +200,7 @@ def edit_term(data: dict, term_english: str):
         term["context"] = new_ctx
     
     term["confidence"] = "high"  # Editado manualmente = alta confiança
-    print(f"✅ Atualizado: \"{term['term_english']}\" → \"{term['term_translated']}\"")
+    print(f"[OK] Atualizado: \"{term['term_english']}\" → \"{term['term_translated']}\"")
 
 
 def remove_term(data: dict, term_english: str):
@@ -209,9 +209,9 @@ def remove_term(data: dict, term_english: str):
     data["terms"] = [t for t in data["terms"] if t["term_english"].lower() != term_english.lower()]
     removed = original_len - len(data["terms"])
     if removed:
-        print(f"✅ Removido \"{term_english}\".")
+        print(f"[OK] Removido \"{term_english}\".")
     else:
-        print(f"❌ Termo \"{term_english}\" não encontrado.")
+        print(f"[ERR] Termo \"{term_english}\" não encontrado.")
 
 
 def export_csv(data: dict, path: str):
@@ -228,13 +228,13 @@ def export_csv(data: dict, path: str):
                 t.get("confidence", ""),
                 t.get("usage_count", 0)
             ])
-    print(f"✅ Exportado: {path} ({len(data.get('terms', []))} termos)")
+    print(f"[OK] Exportado: {path} ({len(data.get('terms', []))} termos)")
 
 
 def import_csv(data: dict, path: str, merge: bool = True):
     """Importa termos de CSV."""
     if not os.path.exists(path):
-        print(f"❌ Arquivo não encontrado: {path}")
+        print(f"[ERR] Arquivo não encontrado: {path}")
         return
     
     imported = 0
@@ -265,7 +265,7 @@ def import_csv(data: dict, path: str, merge: bool = True):
                 data["terms"].append(entry)
             imported += 1
     
-    print(f"✅ Importado: {imported} termos de {path}")
+    print(f"[OK] Importado: {imported} termos de {path}")
 
 
 def interactive_mode(data: dict, path: str):
@@ -315,11 +315,11 @@ def interactive_mode(data: dict, path: str):
             save_glossary(path, data)
             break
         except Exception as e:
-            print(f"❌ Erro: {e}")
+            print(f"[ERR] Erro: {e}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Gerenciador de Glossário de Tradução de Jogos")
+    parser = argparse.ArgumentParser(description="Gerenciador de Glossario de Tradução de Jogos")
     parser.add_argument("glossary_file", help="Arquivo JSON do glossário")
     parser.add_argument("--list", action="store_true", help="Lista todos os termos")
     parser.add_argument("--category", help="Filtra por categoria ao listar")

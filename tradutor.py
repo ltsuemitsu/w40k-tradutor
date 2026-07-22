@@ -1040,7 +1040,7 @@ def main():
         MEDIUM_BATCH = 30
         LONG_BATCH = 12
         XLONG_BATCH = 5
-        logger.info("🚀 Optimized batching: using maximum tier sizes (50/30/12/5)")
+        logger.info("[*] Optimized batching: using maximum tier sizes (50/30/12/5)")
     else:
         SHORT_BATCH = min(50, max(args.batch_size * 3, 30))
         MEDIUM_BATCH = min(30, max(args.batch_size, 12))
@@ -1182,7 +1182,7 @@ def main():
             logger.warning(f"Não foi possível salvar preserve_map: {e}")
 
     logger.info(
-        f"✅ Concluído: {success} traduzidos | {failed} falhas | "
+        f"[OK] Concluído: {success} traduzidos | {failed} falhas | "
         f"{preserved_exact} exact EN | {preserved_inline} inline locked"
     )
     logger.info(f"📁 Salvo: {args.output}")
