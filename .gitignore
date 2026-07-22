@@ -16,6 +16,8 @@ dist/
 .DS_Store
 Thumbs.db
 *.log
+*.bak
+*~
 
 # --- App generated state / personal project data ---
 prescan_cache.json
@@ -25,11 +27,27 @@ preserve_map.json
 glossary_pass_temp.json
 mechanics_for_full.json
 delta_*.json
+glossary_candidates.json
+data/glossary_candidates.json
+tmp*
+tmpr*
 
-# --- Game data (copyrighted Owlcat files - NEVER commit) ---
+# --- Game data (copyrighted Owlcat files — NEVER commit) ---
 data/en/*.json
 data/pt/
+data/MOD/
 data/blacklists/blacklist_candidates.*
+# Keep sample/README blacklists tracked; ignore loose dumps
+*.zip
 
 # --- Old local archive (kept locally, not in git) ---
 archive/
+
+# --- Secrets / env (defense in depth; keys should never live here) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials*

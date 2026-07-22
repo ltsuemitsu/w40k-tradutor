@@ -2,119 +2,185 @@
 
 ![tests](https://github.com/ltsuemitsu/w40k-tradutor/actions/workflows/tests.yml/badge.svg)
 
-A fan-made toolkit to translate *Warhammer 40,000: Rogue Trader* (Owlcat Games)
-localization files from English to Brazilian Portuguese, using LLM APIs
-(DeepSeek by default; also Zhipu GLM or any OpenAI-compatible endpoint).
+Toolkit de fã para traduzir os arquivos de localização de
+**Warhammer 40,000: Rogue Trader** (Owlcat Games) do inglês para
+**português brasileiro**, usando APIs de LLM (DeepSeek por padrão; também
+Zhipu GLM, Kimi/Moonshot ou qualquer endpoint compatível com OpenAI).
 
-It combines a cost-aware translation engine, a 2,600+ term lore glossary built
-from the community wiki, patch-diff tooling for game updates, and a PySide6
-desktop GUI ("Grimdark Edition").
+Inclui motor com controle de custo, glossário de lore/mecânica, proteção de
+tags técnicas do jogo, fluxo **dual-track** (Preservada + Completa), diff de
+patch e GUI desktop PySide6 (“Grimdark Edition”).
 
-> **Not affiliated with Owlcat Games or Games Workshop.** Fan project for
-> personal/educational use. No game files are included in this repository —
-> you must legally own the game and extract the localization files yourself.
+> **Não afiliado** à Owlcat Games nem à Games Workshop.  
+> Projeto de fã para uso pessoal / comunitário / educacional.  
+> **Nenhum arquivo de jogo** entra neste repositório — você precisa possuir o
+> jogo legalmente e extrair os JSONs de localização você mesmo.
 
 ---
 
-## Features
+## O que este repo é (e o que não é)
 
-- **Dual-track output** — **Preserved** (EN mechanics + PT narrative) and **Full**
-  (100% PT via free glossary replace / Fullize).
-- **Smart preserve** — exact whole-string wiki terms stay EN; terms *inside*
-  phrases are hard-locked (`§TERM§`) while the sentence still translates.
-- **Hard tech protect** — Encyclopedia, `{g|…}`, `{mf|…}`, `{name}`, binds,
-  sprites, indent… never reach the LLM.
-- **Cost control** — free pre-scan, empty/placeholder/EULA skip, budget
-  estimator, blacklists, length-tiered batching (short×50 … xlong×5).
-- **Crash-safe** — atomic save after every batch; `--resume` continues exactly
-  where a run stopped.
-- **Game-update workflow** — free EN↔EN patch diff produces a delta file with
-  only new/changed strings.
-- **Desktop GUI** — guided dual-track buttons, glossary editor, update + merge.
+| É | Não é |
+|---|---|
+| Ferramenta para **gerar** tradução PT-BR | Um mod pronto para instalar no Nexus |
+| Pipeline + glossário **do Rogue Trader** | Localização oficial da Owlcat |
+| Código open-source (MIT) | Pacote com `enGB.json` do jogo (copyright) |
 
-## Dual-track recipe (recommended)
+Os zips de tradução para jogadores ficam em páginas de mod (ex.: Nexus), não
+aqui. Aqui está o **como fazer** e o **glossário RT** para a comunidade
+reproduzir, auditar e melhorar.
 
-### GUI
-1. Open `launch_gui.bat` → Translate tab  
-2. **Pre-Scan** (free)  
-3. Paths: Input EN · Output Preserved · Output Full · Glossary  
-4. Preserve ON → **1) Start Preserve Translation**  
-5. **2) Fullize → 100% PT (FREE)**
+---
 
-### CLI
+## Glossário = Rogue Trader (importante)
+
+O `glossary.json` e os seeds em `data/glossaries/` foram montados para
+**Warhammer 40,000: Rogue Trader** (termos de talents, armas, archetypes,
+lore do Koronus Expanse, etc. — milhares de entradas EN→PT-BR).
+
+### Quer usar em outro jogo (ex.: Dark Heresy)?
+
+O **motor** (tags Owlcat-like, batches, preserve, fullize, GUI) pode servir de
+base se o formato de localização for parecido.
+
+O **glossário não serve “de carona”**:
+
+1. **Não reutilize cegamente** o `glossary.json` do Rogue Trader em outro título.
+   Muitos termos mudam de sentido, não existem, ou têm outro nome canônico.
+2. **Atualize** o glossário (edite, apague categorias irrelevantes, marque
+   `preserve` / `inline` com calma), **ou**
+3. **Crie do zero** com as ferramentas do repo:
+   - `wiki_sync.py` / botão Live Wiki na GUI (semente a partir de listas/wiki)
+   - `glossary_manager.py` (edição CLI)
+   - aba de glossário na GUI
+   - scan de candidatos a termo (quando disponível no seu fluxo)
+4. Rode **dry-run / Pre-Scan** e audite um lote pequeno **antes** de gastar API
+   no jogo inteiro.
+
+Resumo: **mesmo universo 40k ≠ mesmo glossário**. RT e Dark Heresy pedem
+listas próprias (ou uma derivada com revisão humana pesada).
+
+---
+
+## Dual-track: Preservada vs Completa (Full)
+
+Fluxo recomendado — **duas saídas** a partir do mesmo inglês:
+
+| Saída | O que é | Para quem |
+|---|---|---|
+| **Preservada** (`ptBR_preserved…`) | Narrativa/UI em PT; nomes de mecânica/wiki ficam em **EN** quando o glossário manda (exact skip + lock inline) | Quem usa builds, guias e wiki em inglês |
+| **Completa / Full** (`ptBR_full…`) | Parte da Preservada e aplica **Fullize** (replace EN→PT do glossário, **sem** nova chamada cara de IA) | Quem quer imersão 100% em português |
+
+### O que cada string faz no modo Preserve
+
+| Tipo | Ação | Custo |
+|---|---|---|
+| vazia / placeholder | copia / skip | grátis |
+| EULA / legal enorme | skip (blacklist) | grátis |
+| termo wiki **exato** (string inteira) | mantém EN | grátis |
+| termo **dentro** da frase | traduz a frase, trava o termo (`§TERM§`) | API |
+| narrativa limpa | traduz normal | API |
+
+Tags técnicas do jogo (`{g\|…}`, Encyclopedia, `{name}`, binds, sprites, cores,
+indent…) são **blindadas** e não devem ir “cruas” para o modelo.
+
+---
+
+## Requisitos
+
+- Python **3.10+** (3.12 testado no CI)
+- Chave de API (DeepSeek recomendado para volume; outros provedores ok)
+- Cópia legal do jogo para obter o JSON de localização
+
 ```bash
-# 1) Preserved master (API)
-python tradutor.py -i data/en/enGB_new.json -o data/pt/ptBR_preserved.json \
-  -g glossary.json --mode preserve --resume --preserve-map preserve_map.json
-
-# 2) Full master (FREE — no API)
-python tradutor.py --fullize \
-  -i data/pt/ptBR_preserved.json -o data/pt/ptBR_full.json -g glossary.json
-
-# Dry-run classify + protect only
-python tradutor.py -i data/en/enGB_new.json -o data/pt/_dry.json \
-  -g glossary.json --mode preserve --dry-run
+pip install -r requirements-gui.txt
+# openai, tqdm, PySide6, keyring
 ```
 
-### What each string does in Preserve mode
-| Kind | Action |
-|---|---|
-| empty / placeholder | skip (free) |
-| EULA / huge legal | skip (free) |
-| exact wiki term | copy EN (free) |
-| term inside phrase | translate + hard-lock term |
-| clean narrative | normal PT translate |
-
-## Repository layout
-
-| File | Role |
-|---|---|
-| `tradutor.py` | Core engine + CLI (`--mode preserve`, `--fullize`, smart batches) |
-| `tradutor_desktop.py` | PySide6 GUI (drives the CLIs) |
-| `diff_tool.py` | Audit translations, diff game patches |
-| `merge.py` | Merge correction/retranslation files into a base PT |
-| `glossary_manager.py` | Interactive CLI glossary editor |
-| `wiki_sync.py` | Glossary seeder (loads offline wiki term lists) |
-| `data/glossaries/wiki_terms.json` | Offline wiki terms (~2,694 in 16 categories) |
-| `glossary.json` | Community glossary (~2,694 terms, EN→PT-BR) |
-| `launch_gui.bat` / `launch_gui.ps1` | Windows launchers |
-| `SCENARIOS.md` | Design contract: core workflows |
-
-## Requirements
-
-- Python **3.10+** (3.12 tested in CI)
-- `pip install -r requirements-gui.txt` (`openai`, `tqdm`, `PySide6`, `keyring`)
-- An API key for DeepSeek (default) or another OpenAI-compatible provider
-
-## Configuration
+### Chaves de API (nunca commitar)
 
 ```bash
-# DeepSeek (default provider)
-set DEEPSEEK_API_KEY=sk-...          # Windows
-export DEEPSEEK_API_KEY=sk-...       # Linux/macOS
+# Windows (cmd)
+set DEEPSEEK_API_KEY=sk-...
 
-# Optional: override endpoint / model
-set DEEPSEEK_BASE_URL=https://api.deepseek.com
+# Windows (PowerShell)
+$env:DEEPSEEK_API_KEY="sk-..."
+
+# Linux / macOS
+export DEEPSEEK_API_KEY=sk-...
 ```
 
-The GUI also lets you paste keys per-provider. Prefer **Save to keychain**
-(OS Credential Manager via `keyring`).
+Na GUI: cole a chave e, se quiser, marque **Save in OS keychain**
+(Windows Credential Manager via `keyring`).  
+**Não** coloque chaves em arquivos do projeto, no `glossary.json`, nem em issues.
 
-## Quick start
+Variáveis úteis: `DEEPSEEK_API_KEY`, `ZHIPU_API_KEY`, `MOONSHOT_API_KEY`,
+`OPENAI_API_KEY` (custom), opcionalmente `DEEPSEEK_BASE_URL`.
 
-**1. Get the game files.** From your legally owned game installation, copy the
-localization JSON into `data/en/` (see `data/en/README.txt`). These files are
-**not** in this repo and must never be committed.
+---
 
-**2. (First time) Seed/refresh the glossary:**
+## Início rápido
+
+### 1. Pegue os arquivos do jogo
+
+Na instalação Steam do Rogue Trader, localize algo como:
+
+```text
+...\Warhammer 40,000 Rogue Trader\WH40KRT_Data\StreamingAssets\Localization\enGB.json
+```
+
+Copie o `enGB.json` (ou o dump da versão que for traduzir) para:
+
+```text
+data/en/enGB.json
+```
+
+(ver `data/en/README.txt`). Esses JSONs estão no `.gitignore` de propósito.
+
+### 2. (Opcional) Atualizar semente de wiki / glossário
 
 ```bash
 python wiki_sync.py --glossary glossary.json --sync
 ```
 
-**3. Dual-track translate** — see recipe above (GUI or CLI).
+### 3. Traduzir — GUI (mais fácil)
 
-**4. After a game patch (free diff, then translate only the delta):**
+```text
+launch_gui.bat
+```
+
+Aba **Translate** (fluxo guiado):
+
+1. **Pre-Scan** (grátis) — conta skips / EULA / preserve  
+2. Caminhos: Input EN · Output Preserved · Output Full · Glossary  
+3. Preserve ON → **Start Preserve Translation**  
+4. **Fullize → 100% PT (FREE)**  
+5. Instale no jogo só **uma** das saídas, renomeando para `enGB.json` na pasta
+   Localization (faça backup do original).
+
+### 4. Traduzir — CLI
+
+```bash
+# 1) Master Preservada (usa API)
+python tradutor.py -i data/en/enGB.json -o data/pt/ptBR_preserved.json \
+  -g glossary.json --mode preserve --resume --preserve-map preserve_map.json
+
+# 2) Master Completa (GRÁTIS — sem API)
+python tradutor.py --fullize \
+  -i data/pt/ptBR_preserved.json -o data/pt/ptBR_full.json -g glossary.json
+
+# Só classificar / proteger (sem gastar API)
+python tradutor.py -i data/en/enGB.json -o data/pt/_dry.json \
+  -g glossary.json --mode preserve --dry-run
+```
+
+`--resume` continua de onde parou (save atômico por batch).
+
+---
+
+## Depois de um patch do jogo
+
+Não re-traduza 70k strings. Diff EN→EN e traduza só o delta:
 
 ```bash
 python diff_tool.py update data/en/enGB_old.json data/en/enGB_new.json --out delta.json
@@ -124,34 +190,80 @@ python merge.py -b data/pt/ptBR_preserved.json data/pt/delta_preserved.json -o d
 python merge.py -b data/pt/ptBR_full.json data/pt/delta_full.json -o data/pt/ptBR_full.json --backup
 ```
 
-**5. Audit quality:**
+Auditoria:
 
 ```bash
 python diff_tool.py audit data/en/enGB.json data/pt/ptBR_preserved.json
 ```
 
-See `SCENARIOS.md` for broader workflow notes.
+Detalhes de desenho: [`SCENARIOS.md`](SCENARIOS.md).
 
-## Development
+---
 
-Run the test suite (stdlib `unittest` only — no pytest needed):
+## Layout do repositório
+
+| Caminho | Função |
+|---|---|
+| `tradutor.py` | Motor + CLI (`--mode preserve`, `--fullize`, batches, resume) |
+| `tradutor_desktop.py` | GUI PySide6 |
+| `diff_tool.py` | Diff de update, audit, smart-diff |
+| `merge.py` | Mescla correções / deltas no master PT |
+| `glossary_manager.py` | Editor CLI do glossário |
+| `wiki_sync.py` | Semente / sync de termos (wiki offline + live) |
+| `glossary.json` | Glossário comunitário **Rogue Trader** EN→PT-BR |
+| `data/glossaries/` | Seeds / `wiki_terms.json` (RT) |
+| `data/blacklists/` | UUIDs EULA etc. (amostras) |
+| `data/en/`, `data/pt/` | Seus dumps locais (**não versionados**) |
+| `tests/` | Unittest sem rede / sem API |
+| `launch_gui.bat` / `.ps1` | Atalhos Windows |
+
+---
+
+## Desenvolvimento e testes
 
 ```bash
 pip install openai tqdm
 python -m unittest discover -s tests -v
 ```
 
-Tests use tiny synthetic fixtures — no network, no API keys, no LLM calls.
-CI runs a compile-all syntax gate plus the suite on Ubuntu and Windows ×
-Python 3.10/3.12 (see `.github/workflows/tests.yml`).
+CI (GitHub Actions): Ubuntu + Windows × Python 3.10/3.12 — `compileall` + unittest.  
+Testes usam fixtures sintéticas: **sem** chaves, **sem** arquivos do jogo.
 
-## Contributing
+---
 
-Issues and PRs are welcome. Please **never** commit game localization files,
-caches (`prescan_cache.json`, `preserve_map.json`), or your personal `.w40k`
-project files — see `.gitignore`.
+## Segurança e boa prática ao contribuir
 
-## License
+- **Nunca** commite: `enGB.json`, saídas PT, zips de mod, `.w40k`,
+  `prescan_cache.json`, `preserve_map.json`, `.env`, backups com path local.
+- **Nunca** cole API keys em issues, PRs ou screenshots do README.
+- Chaves: variável de ambiente ou keychain da GUI.
+- Pull requests são bem-vindos (glossário, bugs de tag, docs).  
+  Não envie dumps completos de localização do jogo.
 
-MIT — see [LICENSE](LICENSE). Game content belongs to Owlcat Games / Games
-Workshop; this repo contains only tooling and a community glossary.
+---
+
+## Tradução assistida por IA × tradução humana
+
+Este toolkit **acelera** cobertura e consistência de glossário.  
+Tradução revisada por humanos continua sendo o padrão ouro de qualidade
+literária. Se for publicar um mod gerado daqui, deixe isso claro na página e
+valorize também os projetos PT-BR feitos à mão pela comunidade.
+
+---
+
+## Aviso legal
+
+- Conteúdo de *Warhammer 40,000: Rogue Trader* © Owlcat Games / Games Workshop.
+- Este repositório contém **apenas** ferramentas e glossário comunitário.
+- MIT — ver [LICENSE](LICENSE). O jogo e suas strings **não** são redistribuídos
+  por este projeto.
+
+---
+
+## Créditos
+
+- Owlcat / GW pelo jogo e universo.
+- Comunidade PT-BR de Rogue Trader (traduções, guias, feedback de tom).
+- Contribuidores de termos no glossário e quem reporta tags quebradas.
+
+**O Imperador protege — e o Pre-Scan também.**
