@@ -230,27 +230,37 @@ class SmartGlossary:
             out[en] = pt
         return out
 
-    def format_for_prompt(self) -> str:
-        """Formata entradas para o system prompt (consistência)."""
-        if not self.entries:
-            return ""
-        lines = ["\n\nGLOSSÁRIO ATIVO (termos estabelecidos — SIGA):"]
-        for entry in sorted(self.entries.values(), key=lambda x: -x.get("usage_count", 1))[:50]:
-            lines.append(
-                f'- "{entry["term_english"]}" → "{entry.get("term_translated","")}" [{entry.get("category","")}]'
-            )
-        return "\n".join(lines)
+    def format_for_prompt(self, max_terms: int = 80) -> str:
+        """Stable glossary block for system prompt (prompt-cache friendly).
 
-    def format_translation_guide(self, max_terms: int = 100) -> str:
-        """Formata glossário como guia de tradução para segunda passada.
-
-        Diferente de format_for_prompt, aqui os termos são SUGESTÕES de consistência.
-        O LLM deve usar o termo traduzido como guia, mas traduzir localizadamente.
+        Sorted by English term — never by usage_count (that changes mid-run and
+        busts provider cached-input prefixes).
         """
         if not self.entries:
             return ""
+        lines = ["\n\nGLOSSÁRIO ATIVO (termos estabelecidos — SIGA):"]
+        # Alphabetical = deterministic across the whole job
+        ordered = sorted(
+            self.entries.values(),
+            key=lambda x: (x.get("term_english") or "").lower(),
+        )[:max_terms]
+        for entry in ordered:
+            en = entry.get("term_english", "")
+            pt = entry.get("term_translated", "")
+            cat = entry.get("category", "")
+            lines.append(f'- "{en}" → "{pt}" [{cat}]')
+        return "\n".join(lines)
+
+    def format_translation_guide(self, max_terms: int = 100) -> str:
+        """Stable consistency guide (also cache-friendly — alpha order)."""
+        if not self.entries:
+            return ""
         lines = ["\n\nGUIA DE CONSISTÊNCIA (use como referência, mas traduza naturalmente):"]
-        for entry in sorted(self.entries.values(), key=lambda x: -x.get("usage_count",1))[:max_terms]:
+        ordered = sorted(
+            self.entries.values(),
+            key=lambda x: (x.get("term_english") or "").lower(),
+        )[:max_terms]
+        for entry in ordered:
             en = entry.get("term_english", "")
             pt = entry.get("term_translated", "") or en
             cat = entry.get("category", "")
@@ -819,17 +829,68 @@ def main():
                         help="Forca extracao de termos para o glossario mesmo em dry-run (usado pelo botao Populate Glossary)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--model", default="deepseek-chat")
+    parser.add_argument("--model", default="deepseek-v4-flash")
     parser.add_argument("--prescan-cache", dest="prescan_cache", default="prescan_cache.json",
                         help="JSON cache from Pre-Scan (skips re-classification of preserved/skip/eula UUIDs)")
     parser.add_argument("--optimized-batch", action="store_true", default=True,
-                        help="Smart tier batch sizes (short=50, med=30, long=12, xlong=5). On by default.")
+                        help="Smart tier batch sizes from model profile. On by default.")
     parser.add_argument("--no-optimized-batch", action="store_false", dest="optimized_batch",
                         help="Disable smart tier sizes; derive from --batch-size only.")
+    parser.add_argument("--no-profile", action="store_true",
+                        help="Ignore model_profiles (use raw -w/-b and default token cap).")
+    parser.add_argument("--save-every", type=int, default=0,
+                        help="Write output every N batches (0=from model profile).")
     args = parser.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # ── Model profile (batch tiers / workers / save cadence / token budget) ──
+    try:
+        from model_profiles import (
+            resolve_profile,
+            batch_tiers,
+            recommended_workers,
+            save_every_batches,
+            max_tokens_per_batch,
+            profile_summary,
+        )
+        _HAVE_PROFILES = True
+    except ImportError:
+        _HAVE_PROFILES = False
+
+    profile_workers = args.workers
+    profile_save_every = args.save_every if args.save_every > 0 else 1
+    profile_max_tok = MAX_TOKENS_PER_BATCH
+    profile_batches = None  # type: ignore
+
+    if _HAVE_PROFILES and not args.no_profile:
+        rid, _p = resolve_profile(args.model)
+        # Only auto-bump workers when user left CLI default
+        if args.workers == DEFAULT_MAX_WORKERS:
+            profile_workers = recommended_workers(args.model)
+            args.workers = profile_workers
+        if args.save_every <= 0:
+            profile_save_every = save_every_batches(args.model)
+        else:
+            profile_save_every = args.save_every
+        profile_max_tok = max_tokens_per_batch(args.model)
+        if args.optimized_batch:
+            profile_batches = batch_tiers(args.model, optimized=True)
+        logger.info(f"Model profile: {profile_summary(args.model)}")
+        logger.info(
+            f"Cache tip: system+glossary prefix is stable (alpha glossary). "
+            f"Only the user batch JSON changes → provider cached-input."
+        )
+    else:
+        if args.save_every > 0:
+            profile_save_every = args.save_every
+        logger.info("Model profiles disabled or missing — using CLI defaults.")
+
+    logger.info(
+        f"Config: model={args.model} | mode={args.mode} | batch={args.batch_size} | "
+        f"workers={args.workers} | temp={args.temperature} | save_every={profile_save_every} | dry_run={args.dry_run}"
+    )
 
     # Free fullize path (no LLM)
     if args.fullize:
@@ -837,9 +898,6 @@ def main():
             logger.error("--fullize requires -g/--glossary")
             return 1
         return fullize_file(args.input, args.output, args.glossary)
-
-    # Console feedback: show the active configuration immediately
-    logger.info(f"Config: model={args.model} | mode={args.mode} | batch={args.batch_size} | workers={args.workers} | temp={args.temperature} | dry_run={args.dry_run}")
 
     # ── CARREGA ──
     input_data = load_json(args.input)
@@ -1034,23 +1092,32 @@ def main():
             xlong_pending.append(item)
     
     # Adaptive batch sizes: bigger for short strings, smaller for long
-    if args.optimized_batch:
-        # Maximum tier sizes regardless of base batch_size — minimizes API calls
+    # Adaptive batch sizes from model profile (or legacy defaults)
+    if args.optimized_batch and profile_batches:
+        SHORT_BATCH, MEDIUM_BATCH, LONG_BATCH, XLONG_BATCH = profile_batches
+        logger.info(
+            f"Optimized batching (profile): short×{SHORT_BATCH} med×{MEDIUM_BATCH} "
+            f"long×{LONG_BATCH} xlong×{XLONG_BATCH}"
+        )
+    elif args.optimized_batch:
         SHORT_BATCH = 50
         MEDIUM_BATCH = 30
         LONG_BATCH = 12
         XLONG_BATCH = 5
-        logger.info("[*] Optimized batching: using maximum tier sizes (50/30/12/5)")
+        logger.info("Optimized batching: default tier sizes (50/30/12/5)")
     else:
         SHORT_BATCH = min(50, max(args.batch_size * 3, 30))
         MEDIUM_BATCH = min(30, max(args.batch_size, 12))
         LONG_BATCH = min(12, max(args.batch_size // 2, 6))
         XLONG_BATCH = min(5, max(2, args.batch_size // 4))
-    
-    logger.info(f"Smart batches: short({len(short_pending)})×{SHORT_BATCH} | "
-                f"medium({len(medium_pending)})×{MEDIUM_BATCH} | "
-                f"long({len(long_pending)})×{LONG_BATCH} | "
-                f"xlong({len(xlong_pending)})×{XLONG_BATCH}")
+
+    tok_cap = profile_max_tok if profile_max_tok else MAX_TOKENS_PER_BATCH
+    logger.info(
+        f"Smart batches: short({len(short_pending)})×{SHORT_BATCH} | "
+        f"medium({len(medium_pending)})×{MEDIUM_BATCH} | "
+        f"long({len(long_pending)})×{LONG_BATCH} | "
+        f"xlong({len(xlong_pending)})×{XLONG_BATCH} | tok_cap={tok_cap}"
+    )
     
     batches_raw = []
     if short_pending:
@@ -1065,8 +1132,8 @@ def main():
     batches = []
     for raw in batches_raw:
         tok = sum(estimate_tokens(v.get("Text","")) for _,v in raw)
-        if tok > MAX_TOKENS_PER_BATCH:
-            batches.extend(split_batch(raw))
+        if tok > tok_cap:
+            batches.extend(split_batch(raw, max_tok=tok_cap))
         else:
             batches.append(raw)
     
@@ -1159,9 +1226,10 @@ def main():
                             logger.warning(f"[AUTO-EXTRACT] falhou no batch {batch_idx}: {e}")
                             recent_pairs = []
 
-                    # Salva progresso
-                    output_data["strings"] = translated
-                    atomic_save(output_data, args.output)
+                    # Salva progresso (not every batch — profile save_every)
+                    if batches_done % max(1, profile_save_every) == 0 or batches_done == len(batches):
+                        output_data["strings"] = translated
+                        atomic_save(output_data, args.output)
 
                 except Exception as e:
                     logger.error(f"Batch {batch_idx}: {e}")

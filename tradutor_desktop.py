@@ -651,46 +651,73 @@ class W40kTranslatorGUI(QMainWindow):
 
         pl.addWidget(QLabel("Provider:"))
         self.provider_combo = QComboBox()
-        self.provider_combo.addItems(["DeepSeek (default)", "Zhipu GLM (GLM-4)", "Custom (OpenAI compat)"])
+        self.provider_combo.addItems([
+            "DeepSeek",
+            "Zhipu GLM",
+            "Kimi (Coding)",
+            "Custom (OpenAI compat)",
+        ])
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         pl.addWidget(self.provider_combo)
 
         pl.addWidget(QLabel("API Key:"))
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
-        self.api_key_edit.setPlaceholderText("Leave empty to use env var (DEEPSEEK_API_KEY etc.)")
+        self.api_key_edit.setPlaceholderText("Leave empty to use env var")
         self.api_key_edit.textChanged.connect(self._on_api_key_changed)
         pl.addWidget(self.api_key_edit, 1)
 
         save_key_cb = QCheckBox("Save securely (OS keychain)")
-        save_key_cb.setToolTip("Stores the key in your operating system's secure keychain (Windows Credential Manager) via keyring. Never sent anywhere. Uncheck to remove it. If keyring is not installed, falls back to plain app settings (not recommended).")
+        save_key_cb.setToolTip(
+            "OS keychain via keyring. Uncheck to remove. Falls back to plain settings if keyring missing."
+        )
         save_key_cb.stateChanged.connect(self._on_save_key_toggled)
         pl.addWidget(save_key_cb)
         self.save_key_cb = save_key_cb
 
-        pl.addWidget(QLabel("Model:"))
+        layout.addWidget(params_g)
+
+        # Model + URL (cache-friendly bulk uses stable system prompt in engine)
+        model_g = QGroupBox("Model & endpoint (profile tunes batches/workers)")
+        mg = QGridLayout(model_g)
+        mg.addWidget(QLabel("Base URL:"), 0, 0)
+        self.base_url_edit = QLineEdit()
+        self.base_url_edit.setText("https://api.deepseek.com")
+        self.base_url_edit.setPlaceholderText("https://api.deepseek.com")
+        mg.addWidget(self.base_url_edit, 0, 1)
+        mg.addWidget(QLabel("Model:"), 1, 0)
         self.model_edit = QComboBox()
         self.model_edit.setEditable(True)
         self.model_edit.addItems([
-            "deepseek-v4-pro",
             "deepseek-v4-flash",
+            "deepseek-v4-pro",
             "deepseek-chat",
             "deepseek-reasoner",
+            "glm-5.2",
+            "glm-5.1",
+            "glm-5",
+            "glm-5-turbo",
+            "glm-4.7",
+            "glm-4.7-flash",
+            "glm-4.7-flashx",
+            "glm-4.5-flash",
+            "glm-4.5-air",
             "glm-4-plus",
-            "glm-4-air",
             "glm-4-flash",
+            "k3",
+            "kimi-for-coding",
+            "kimi-for-coding-highspeed",
         ])
-        self.model_edit.setCurrentText("deepseek-v4-pro")
-        self.model_edit.setMinimumWidth(160)
-        self.model_edit.setToolTip(
-            "Model: deepseek-v4-pro (your preferred — higher quality, more expensive).\n"
-            "deepseek-v4-flash = significantly cheaper / faster for big jobs.\n"
-            "deepseek-chat and reasoner also available.\n"
-            "For GLM/Zhipu use glm-4-plus etc. You can type any name."
-        )
-        pl.addWidget(self.model_edit)
-
-        layout.addWidget(params_g)
+        self.model_edit.setCurrentText("deepseek-v4-flash")
+        self.model_edit.setMinimumWidth(200)
+        self.model_edit.currentTextChanged.connect(self._on_model_changed_profile)
+        mg.addWidget(self.model_edit, 1, 1)
+        self.profile_label = QLabel("")
+        self.profile_label.setWordWrap(True)
+        self.profile_label.setStyleSheet("color:#8a7560;")
+        mg.addWidget(self.profile_label, 2, 0, 1, 2)
+        layout.addWidget(model_g)
+        QTimer.singleShot(0, self._refresh_profile_label)
 
         # Advanced params
         adv_g = QGroupBox("Advanced")
@@ -704,8 +731,9 @@ class W40kTranslatorGUI(QMainWindow):
 
         adv.addWidget(QLabel("Workers:"))
         self.workers_spin = QSpinBox()
-        self.workers_spin.setRange(1, 8)
-        self.workers_spin.setValue(3)
+        self.workers_spin.setRange(0, 16)
+        self.workers_spin.setValue(0)  # 0 = model profile
+        self.workers_spin.setToolTip("0 = auto from model_profiles.py (recommended)")
         adv.addWidget(self.workers_spin)
 
         adv.addWidget(QLabel("Temperature:"))
@@ -2613,39 +2641,46 @@ class W40kTranslatorGUI(QMainWindow):
             except Exception:
                 pass  # if unreadable, just run without resume
 
+        model_name = self.model_edit.currentText().strip() or "deepseek-v4-flash"
+        w_val = self.workers_spin.value()
         cmd += [
             "-b", str(self.batch_spin.value()),
-            "-w", str(self.workers_spin.value()),
+            "-w", str(w_val if w_val > 0 else 0),
             "--temperature", str(self.temp_spin.value()),
-            "--model", self.model_edit.currentText().strip() or "deepseek-v4-pro"
+            "--model", model_name,
+            "--optimized-batch",
         ]
 
-        # Provider / key handling — pass via environment to the child process
         key = self.api_key_edit.text().strip()
         provider = self.provider_combo.currentText()
-
-        # Build a clean environment for the translation process
         env = os.environ.copy()
         if key:
             env["DEEPSEEK_API_KEY"] = key
-            # Also common for some GLM setups that accept OPENAI_API_KEY
             env["OPENAI_API_KEY"] = key
+            env["ZHIPU_API_KEY"] = key
+            env["KIMI_API_KEY"] = key
+            env["MOONSHOT_API_KEY"] = key
 
-        if "GLM" in provider or "Zhipu" in provider:
-            env["DEEPSEEK_BASE_URL"] = "https://open.bigmodel.cn/api/paas/v4"
-            # Common model suggestion
-            if not self.model_edit.currentText().strip() or self.model_edit.currentText().strip() in ("deepseek-chat", "deepseek-v4-pro"):
-                self.model_edit.setCurrentText("glm-4-plus")
-        elif "Custom" in provider:
-            # User can have set DEEPSEEK_BASE_URL manually in their shell, or we leave it
-            pass
-        else:
-            # DeepSeek default
-            if "DEEPSEEK_BASE_URL" not in env:
-                env["DEEPSEEK_BASE_URL"] = "https://api.deepseek.com"
+        # Base URL: explicit field wins
+        base = ""
+        if hasattr(self, "base_url_edit"):
+            base = self.base_url_edit.text().strip()
+        if not base:
+            if "GLM" in provider or "Zhipu" in provider:
+                base = "https://open.bigmodel.cn/api/paas/v4"
+            elif "Kimi" in provider:
+                base = "https://api.kimi.com/coding/v1"
+            elif "Custom" in provider:
+                base = env.get("DEEPSEEK_BASE_URL") or "https://api.openai.com/v1"
+            else:
+                base = "https://api.deepseek.com"
+        env["DEEPSEEK_BASE_URL"] = base
 
-        # Determine key source for logging
-        env_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        env_key = (
+            os.environ.get("DEEPSEEK_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("KIMI_API_KEY")
+        )
         if key:
             key_source = "from input field"
         elif env_key:
@@ -2653,14 +2688,25 @@ class W40kTranslatorGUI(QMainWindow):
         else:
             key_source = "NOT SET — translation will fail"
 
-        model_name = self.model_edit.currentText().strip() or "deepseek-v4-pro"
-        if "v4-pro" in model_name.lower() or "reasoner" in model_name.lower():
-            self._append_log("⚠️  WARNING: You selected an expensive model (pro/reasoner). flash is the cheaper alternative.")
+        try:
+            from model_profiles import profile_summary
+            self._append_log("Profile: " + profile_summary(model_name))
+        except Exception:
+            pass
+        if "glm-5.2" in model_name.lower() or "v4-pro" in model_name.lower():
+            self._append_log(
+                "NOTE: Premium model — output is expensive. "
+                "deepseek-v4-flash is the bulk default if cost matters."
+            )
 
         self._append_log(f"Starting translation: {' '.join(cmd)}")
         self._append_log(f"Model: {model_name}")
-        self._append_log(f"Preserve mode: {'ON (exact EN + inline term lock)' if preserve_on else 'OFF (full translate)'}")
-        self._append_log(f"Provider: {provider} | Base URL effective: {env.get('DEEPSEEK_BASE_URL', '(default)')} | Key: {key_source}")
+        self._append_log(
+            f"Preserve mode: {'ON (exact EN + inline term lock)' if preserve_on else 'OFF (full translate)'}"
+        )
+        self._append_log(
+            f"Provider: {provider} | Base URL: {env.get('DEEPSEEK_BASE_URL')} | Key: {key_source}"
+        )
         if self.tr_blacklist.text().strip():
             cmd += ["--blacklist", self.tr_blacklist.text().strip()]
 
@@ -3319,7 +3365,9 @@ class W40kTranslatorGUI(QMainWindow):
         """Return the storage key name used for a provider's API key."""
         if "GLM" in provider_text or "Zhipu" in provider_text:
             return "api_key_zhipu"
-        elif "Custom" in provider_text:
+        if "Kimi" in provider_text or "Moonshot" in provider_text:
+            return "api_key_kimi"
+        if "Custom" in provider_text:
             return "api_key_custom"
         return "api_key_deepseek"
 
@@ -3397,28 +3445,46 @@ class W40kTranslatorGUI(QMainWindow):
             self.save_key_cb.blockSignals(False)
 
     def _on_provider_changed(self, index: int):
-        """Update placeholders, default model and saved key when provider changes."""
-        text = self.provider_combo.currentText()
-        model = self.model_edit.currentText().strip()
+        """Update URL, default model, key placeholder when provider changes."""
+        textp = self.provider_combo.currentText()
 
-        if "GLM" in text or "Zhipu" in text:
-            self.api_key_edit.setPlaceholderText(
-                "Leave empty to use env var (ZHIPU_API_KEY / OPENAI_API_KEY)"
-            )
-            if not model or model == "deepseek-chat" or model == "deepseek-v4-pro":
-                self.model_edit.setCurrentText("glm-4-plus")
-        elif "Custom" in text:
-            self.api_key_edit.setPlaceholderText(
-                "Leave empty to use env var (OPENAI_API_KEY / custom key)"
-            )
+        if "GLM" in textp or "Zhipu" in textp:
+            self.api_key_edit.setPlaceholderText("env: ZHIPU_API_KEY / OPENAI_API_KEY")
+            if hasattr(self, "base_url_edit"):
+                self.base_url_edit.setText("https://open.bigmodel.cn/api/paas/v4")
+            self.model_edit.setCurrentText("glm-4.7-flash")
+        elif "Kimi" in textp:
+            self.api_key_edit.setPlaceholderText("env: KIMI_API_KEY")
+            if hasattr(self, "base_url_edit"):
+                self.base_url_edit.setText("https://api.kimi.com/coding/v1")
+            self.model_edit.setCurrentText("kimi-for-coding")
+        elif "Custom" in textp:
+            self.api_key_edit.setPlaceholderText("env: OPENAI_API_KEY")
+            if hasattr(self, "base_url_edit"):
+                self.base_url_edit.setText("https://api.openai.com/v1")
         else:
-            self.api_key_edit.setPlaceholderText(
-                "Leave empty to use env var (DEEPSEEK_API_KEY)"
-            )
-            if not model or model == "glm-4-plus":
-                self.model_edit.setCurrentText("deepseek-v4-pro")
+            self.api_key_edit.setPlaceholderText("env: DEEPSEEK_API_KEY")
+            if hasattr(self, "base_url_edit"):
+                self.base_url_edit.setText("https://api.deepseek.com")
+            self.model_edit.setCurrentText("deepseek-v4-flash")
 
         self._load_saved_key_for_current_provider()
+        self._refresh_profile_label()
+
+    def _on_model_changed_profile(self, *_args):
+        self._refresh_profile_label()
+
+    def _refresh_profile_label(self):
+        if not hasattr(self, "profile_label"):
+            return
+        model = self.model_edit.currentText().strip() if hasattr(self, "model_edit") else ""
+        try:
+            from model_profiles import profile_summary
+            self.profile_label.setText(profile_summary(model or "deepseek-v4-flash"))
+        except Exception:
+            self.profile_label.setText(
+                "Profiles: model_profiles.py sets batches/workers/save_every at run time."
+            )
 
     def _on_api_key_changed(self, text: str):
         """Auto-save the API key while typing if the user opted to save locally."""

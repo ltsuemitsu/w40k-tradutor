@@ -114,8 +114,33 @@ Na GUI: cole a chave e, se quiser, marque **Save in OS keychain**
 (Windows Credential Manager via `keyring`).  
 **Não** coloque chaves em arquivos do projeto, no `glossary.json`, nem em issues.
 
-Variáveis úteis: `DEEPSEEK_API_KEY`, `ZHIPU_API_KEY`, `MOONSHOT_API_KEY`,
+Variáveis úteis: `DEEPSEEK_API_KEY`, `ZHIPU_API_KEY`, `KIMI_API_KEY`,
 `OPENAI_API_KEY` (custom), opcionalmente `DEEPSEEK_BASE_URL`.
+
+### Modelos e cache (barato vs premium)
+
+Perfis em `model_profiles.py` — o motor escolhe **batch size / workers /
+save_every** pelo nome do modelo:
+
+| Uso | Modelo sugerido | Notas |
+|---|---|---|
+| **Bulk barato (recomendado)** | `deepseek-v4-flash` | ~4h / poucos $ no full game; workers 8 |
+| Premium voz | `glm-5.2` | Output caro; use só se quiser o estilo |
+| Zhipu barato | `glm-4.7-flash` / `glm-4.5-flash` | Free/cheap no plano Zhipu |
+| Kimi coding | `kimi-for-coding` | URL `https://api.kimi.com/coding/v1` |
+
+**Prompt cache:** system + glossário ficam **estáveis** (ordem alfabética).
+Só a lista de strings do batch muda → o provedor cobra prefixo como
+*cached input* (muito mais barato no DeepSeek e no GLM).
+
+```bash
+# Bulk default (profile aplica workers/batches)
+python tradutor.py -i data/en/enGB.json -o data/pt/ptBR_preserved.json \
+  -g glossary.json --mode preserve --resume --model deepseek-v4-flash
+
+# Forçar workers manuais
+python tradutor.py ... --model glm-5.2 -w 3 --save-every 5
+```
 
 ---
 
