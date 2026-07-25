@@ -575,224 +575,167 @@ class W40kTranslatorGUI(QMainWindow):
     # ───────────────────────────────
     def _create_translate_tab(self) -> QWidget:
         w = QWidget()
-        layout = QVBoxLayout(w)
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setSpacing(6)
+
+        # Guide
         guide = QLabel(
-            "<b>Dual-track workflow (recommended)</b><br>"
-            "<b>1.</b> Pre-Scan (free) → review EULA/skip counts<br>"
-            "<b>2.</b> Preserve ON → <b>Start Translation</b> → <code>ptBR_preserved</code> "
-            "(EN mechanics + PT narrative; hard-locks tags &amp; wiki terms inside phrases)<br>"
-            "<b>3.</b> <b>Fullize</b> (free, no API) → <code>ptBR_full</code> "
-            "(glossary EN→PT replace on the preserved file)<br>"
-            "<span style='color:#8a7560'>Exact whole-string wiki terms stay EN in step 2. "
-            "Empty/placeholder/EULA never hit the API. Smart batches: short×50 · med×30 · long×12 · xlong×5.</span>"
+            "<b>Dual-track</b> — Pre-Scan (free) → Preserve translation → Fullize (free)"
         )
         guide.setWordWrap(True)
         guide.setStyleSheet(
             "background:#1a1520; border:1px solid #3a3040; border-radius:6px; "
-            "padding:10px; color:#e8dcc8;"
+            "padding:8px; color:#e8dcc8;"
         )
         layout.addWidget(guide)
 
-        # Files group
+        # Files
         files_g = QGroupBox("Files")
         fl = QVBoxLayout(files_g)
-
-        self.tr_input = self._file_row(fl, "Input (English JSON)", "data/en/enGB.json", self._pick_input)
-        self.tr_output = self._file_row(fl, "Output — Preserved PT (EN terms + PT story)", "data/pt/ptBR_preserved.json", self._pick_output)
-        self.tr_full_output = self._file_row(fl, "Output — Full PT (100% PT via Fullize)", "data/pt/ptBR_full.json", self._pick_output)
+        fl.setSpacing(3)
+        self.tr_input = self._file_row(fl, "Input (EN)", "data/en/enGB.json", self._pick_input)
+        self.tr_output = self._file_row(fl, "Output Preserved PT", "data/pt/ptBR_preserved.json", self._pick_output)
+        self.tr_full_output = self._file_row(fl, "Output Full PT", "data/pt/ptBR_full.json", self._pick_output)
         self.tr_glossary = self._file_row(fl, "Glossary", "glossary.json", self._pick_glossary)
-        self.tr_blacklist = self._file_row(fl, "Blacklist (optional UUIDs)", "data/blacklists/blacklist.json", self._pick_blacklist)
-        self.tr_preserve_map = self._file_row(fl, "Preserve Map (auto from Preserve run)", "preserve_map.json", self._pick_preserve_map)
-        self.tr_preserve_map.setToolTip(
-            "Written on Preserve runs: {uuid: {kind: exact|inline, terms: [...]}}.\n"
-            "exact = whole string was a wiki term (kept EN).\n"
-            "inline = terms hard-locked inside a translated phrase."
-        )
+        self.tr_blacklist = self._file_row(fl, "Blacklist (opt)", "data/blacklists/blacklist_eula.json", self._pick_blacklist)
+        self.tr_preserve_map = self._file_row(fl, "Preserve Map (auto)", "preserve_map.json", self._pick_preserve_map)
 
-        bl_btn = QPushButton("Interactive Blacklist Builder (scan for EULA, long texts, placeholders...)")
-        bl_btn.clicked.connect(self._build_blacklist_interactive)
-        fl.addWidget(bl_btn)
-
-        prescan_btn = QPushButton("🔍 Pre-Scan: Classify All UUIDs (FREE — no API cost)")
-        prescan_btn.setToolTip(
-            "Free classification before spending money:\n"
-            "• SKIP — empty / placeholder\n"
-            "• EULA — huge legal walls (auto-skipped by engine too)\n"
-            "• PRESERVED — exact glossary term (free EN keep)\n"
-            "• SHORT / MEDIUM / LONG — length tiers for smart batches\n"
-            "Note: inline term locks are applied at translate time (not only exact)."
-        )
+        row_tools = QHBoxLayout()
+        prescan_btn = QPushButton("Pre-Scan (FREE)")
         prescan_btn.clicked.connect(self._prescan_source)
-        fl.addWidget(prescan_btn)
-
+        row_tools.addWidget(prescan_btn)
+        bl_btn = QPushButton("Blacklist builder…")
+        bl_btn.clicked.connect(self._build_blacklist_interactive)
+        row_tools.addWidget(bl_btn)
+        fl.addLayout(row_tools)
         layout.addWidget(files_g)
 
-        # Big Preserve Toggle
-        preserve_box = QGroupBox("Preserve mode")
-        preserve_layout = QVBoxLayout(preserve_box)
-        self.preserve_toggle = QCheckBox("PRESERVE WIKI & CORE MECHANICS  (recommended — dual-track step 2)")
-        self.preserve_toggle.setObjectName("big_toggle_label")
-        self.preserve_toggle.setChecked(True)
-        self.preserve_toggle.setToolTip(
-            "ON (recommended):\n"
-            "• EXACT — whole string is a glossary term → keep English, no API\n"
-            "• INLINE — term inside a phrase → translate phrase, hard-lock term as §TERM§\n"
-            "• CLEAN — normal PT translation\n"
-            "• Tags / Encyclopedia / {name} / {mf|…} always hard-protected\n\n"
-            "OFF: full narrative translate (no EN term locks). Use Fullize after Preserve for 100% PT."
-        )
-        preserve_layout.addWidget(self.preserve_toggle)
-        layout.addWidget(preserve_box)
+        # API + Model (compact, single row each)
+        api_g = QGroupBox("API & Model")
+        api_l = QVBoxLayout(api_g)
+        api_l.setSpacing(4)
 
-        # Provider + params
-        params_g = QGroupBox("Translation Settings")
-        pl = QHBoxLayout(params_g)
-
-        pl.addWidget(QLabel("Provider:"))
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Provider:"))
         self.provider_combo = QComboBox()
-        self.provider_combo.addItems([
-            "DeepSeek",
-            "Zhipu GLM",
-            "Kimi (Coding)",
-            "Custom (OpenAI compat)",
-        ])
+        self.provider_combo.addItems(["DeepSeek", "Zhipu GLM", "Kimi (Coding)", "Custom"])
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
-        pl.addWidget(self.provider_combo)
-
-        pl.addWidget(QLabel("API Key:"))
+        row1.addWidget(self.provider_combo)
+        row1.addWidget(QLabel("Key:"))
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
-        self.api_key_edit.setPlaceholderText("Leave empty to use env var")
+        self.api_key_edit.setPlaceholderText("env var if empty")
         self.api_key_edit.textChanged.connect(self._on_api_key_changed)
-        pl.addWidget(self.api_key_edit, 1)
+        row1.addWidget(self.api_key_edit, 1)
+        self.save_key_cb = QCheckBox("Keychain")
+        self.save_key_cb.stateChanged.connect(self._on_save_key_toggled)
+        row1.addWidget(self.save_key_cb)
+        api_l.addLayout(row1)
 
-        save_key_cb = QCheckBox("Save securely (OS keychain)")
-        save_key_cb.setToolTip(
-            "OS keychain via keyring. Uncheck to remove. Falls back to plain settings if keyring missing."
-        )
-        save_key_cb.stateChanged.connect(self._on_save_key_toggled)
-        pl.addWidget(save_key_cb)
-        self.save_key_cb = save_key_cb
-
-        layout.addWidget(params_g)
-
-        # Model + URL (cache-friendly bulk uses stable system prompt in engine)
-        model_g = QGroupBox("Model & endpoint (profile tunes batches/workers)")
-        mg = QGridLayout(model_g)
-        mg.addWidget(QLabel("Base URL:"), 0, 0)
-        self.base_url_edit = QLineEdit()
-        self.base_url_edit.setText("https://api.deepseek.com")
-        self.base_url_edit.setPlaceholderText("https://api.deepseek.com")
-        mg.addWidget(self.base_url_edit, 0, 1)
-        mg.addWidget(QLabel("Model:"), 1, 0)
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("URL:"))
+        self.base_url_edit = QLineEdit("https://api.deepseek.com")
+        row2.addWidget(self.base_url_edit, 1)
+        row2.addWidget(QLabel("Model:"))
         self.model_edit = QComboBox()
         self.model_edit.setEditable(True)
         self.model_edit.addItems([
-            "deepseek-v4-flash",
-            "deepseek-v4-pro",
-            "deepseek-chat",
-            "deepseek-reasoner",
-            "glm-5.2",
-            "glm-5.1",
-            "glm-5",
-            "glm-5-turbo",
-            "glm-4.7",
-            "glm-4.7-flash",
-            "glm-4.7-flashx",
-            "glm-4.5-flash",
-            "glm-4.5-air",
-            "glm-4-plus",
-            "glm-4-flash",
-            "k3",
-            "kimi-for-coding",
-            "kimi-for-coding-highspeed",
+            "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner",
+            "glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo",
+            "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.5-flash", "glm-4.5-air",
+            "glm-4-plus", "glm-4-flash",
+            "k3", "kimi-for-coding", "kimi-for-coding-highspeed",
         ])
         self.model_edit.setCurrentText("deepseek-v4-flash")
-        self.model_edit.setMinimumWidth(200)
+        self.model_edit.setMinimumWidth(160)
         self.model_edit.currentTextChanged.connect(self._on_model_changed_profile)
-        mg.addWidget(self.model_edit, 1, 1)
+        row2.addWidget(self.model_edit)
+        api_l.addLayout(row2)
+
         self.profile_label = QLabel("")
         self.profile_label.setWordWrap(True)
-        self.profile_label.setStyleSheet("color:#8a7560;")
-        mg.addWidget(self.profile_label, 2, 0, 1, 2)
-        layout.addWidget(model_g)
+        self.profile_label.setStyleSheet("color:#8a7560; font-size:11px;")
+        api_l.addWidget(self.profile_label)
+        layout.addWidget(api_g)
         QTimer.singleShot(0, self._refresh_profile_label)
 
-        # Advanced params
-        adv_g = QGroupBox("Advanced")
-        adv = QHBoxLayout(adv_g)
+        # Preserve + dry run
+        mode_row = QHBoxLayout()
+        self.preserve_toggle = QCheckBox("Preserve wiki & mechanics (recommended)")
+        self.preserve_toggle.setChecked(True)
+        mode_row.addWidget(self.preserve_toggle)
+        self.dry_run_cb = QCheckBox("Dry run")
+        mode_row.addWidget(self.dry_run_cb)
+        mode_row.addStretch()
+        layout.addLayout(mode_row)
 
-        adv.addWidget(QLabel("Batch size:"))
-        self.batch_spin = QSpinBox()
-        self.batch_spin.setRange(1, 50)
-        self.batch_spin.setValue(10)
-        adv.addWidget(self.batch_spin)
+        # Advanced (collapsed by default)
+        self._advanced_visible = False
+        adv_toggle = QPushButton("⚙ Advanced ▸")
+        adv_toggle.setFlat(True)
+        adv_toggle.setStyleSheet("text-align:left; color:#8a7560; padding:2px;")
+        adv_toggle.clicked.connect(lambda: self._toggle_advanced(adv_toggle))
+        layout.addWidget(adv_toggle)
 
-        adv.addWidget(QLabel("Workers:"))
-        self.workers_spin = QSpinBox()
-        self.workers_spin.setRange(0, 16)
-        self.workers_spin.setValue(0)  # 0 = model profile
-        self.workers_spin.setToolTip("0 = auto from model_profiles.py (recommended)")
-        adv.addWidget(self.workers_spin)
-
-        adv.addWidget(QLabel("Temperature:"))
-        self.temp_spin = QDoubleSpinBox()
-        self.temp_spin.setRange(0.0, 1.0)
-        self.temp_spin.setSingleStep(0.05)
-        self.temp_spin.setValue(0.15)
-        adv.addWidget(self.temp_spin)
-
-        self.dry_run_cb = QCheckBox("Dry Run (no API calls — test tag protection)")
-        adv.addWidget(self.dry_run_cb)
-
-        self.auto_extract_cb = QCheckBox("Auto-extract terms to glossary during translation (recommended for first pass)")
-        self.auto_extract_cb.setToolTip("Every 5 batches the LLM will also suggest new consistent terms to add to your glossary. Great for populating before the real translation.")
-        adv.addWidget(self.auto_extract_cb)
-
-        layout.addWidget(adv_g)
+        self._adv_widget = QWidget()
+        adv_l = QHBoxLayout(self._adv_widget)
+        adv_l.setContentsMargins(20, 0, 0, 0)
+        adv_l.addWidget(QLabel("Batch:"))
+        self.batch_spin = QSpinBox(); self.batch_spin.setRange(1, 50); self.batch_spin.setValue(10)
+        adv_l.addWidget(self.batch_spin)
+        adv_l.addWidget(QLabel("Workers:"))
+        self.workers_spin = QSpinBox(); self.workers_spin.setRange(0, 16); self.workers_spin.setValue(0)
+        self.workers_spin.setToolTip("0 = auto from profile")
+        adv_l.addWidget(self.workers_spin)
+        adv_l.addWidget(QLabel("Temp:"))
+        self.temp_spin = QDoubleSpinBox(); self.temp_spin.setRange(0.0, 1.0); self.temp_spin.setValue(0.15)
+        adv_l.addWidget(self.temp_spin)
+        self.auto_extract_cb = QCheckBox("Auto-extract")
+        adv_l.addWidget(self.auto_extract_cb)
+        self._adv_widget.setVisible(False)
+        layout.addWidget(self._adv_widget)
 
         # Actions
         action_layout = QHBoxLayout()
         self.translate_btn = QPushButton("▶ 1) START PRESERVE TRANSLATION")
         self.translate_btn.setObjectName("primary")
-        self.translate_btn.setToolTip(
-            "Step 2 of dual-track.\n"
-            "Preserve ON → EN mechanics + PT story → Output Preserved.\n"
-            "Smart batches + EULA/placeholder skip + hard tag protect."
-        )
         self.translate_btn.clicked.connect(lambda: self._start_translation(optimized=True))
         action_layout.addWidget(self.translate_btn)
 
-        self.fullize_btn = QPushButton("✨ 2) FULLIZE → 100% PT (FREE)")
+        self.fullize_btn = QPushButton("✨ 2) FULLIZE (FREE)")
         self.fullize_btn.setObjectName("primary")
-        self.fullize_btn.setToolTip(
-            "Step 3 of dual-track — NO API cost.\n"
-            "Reads Output Preserved, replaces glossary EN terms with PT, writes Output Full."
-        )
         self.fullize_btn.clicked.connect(self._start_fullize)
         action_layout.addWidget(self.fullize_btn)
 
-        self.dryrun_quick_btn = QPushButton("Dry Run (safe test)")
-        self.dryrun_quick_btn.setToolTip("No API calls — classify + protect tags/terms only.")
+        self.dryrun_quick_btn = QPushButton("Dry Run")
         self.dryrun_quick_btn.clicked.connect(
             lambda: (self.dry_run_cb.setChecked(True), self._start_translation(optimized=True))
         )
         action_layout.addWidget(self.dryrun_quick_btn)
 
-        self.retranslate_btn = QPushButton("🔁 Advanced: LLM 2nd pass (legacy)")
-        self.retranslate_btn.setToolTip(
-            "LEGACY / special cases only.\n"
-            "Prefer Fullize (free) for the Full track.\n"
-            "This re-sends preserved UUIDs to the LLM (costs money)."
-        )
+        self.retranslate_btn = QPushButton("Advanced…")
+        self.retranslate_btn.setToolTip("Legacy LLM 2nd pass. Prefer Fullize.")
         self.retranslate_btn.clicked.connect(self._start_second_pass)
         action_layout.addWidget(self.retranslate_btn)
-
         layout.addLayout(action_layout)
-        layout.addStretch()
 
+        layout.addStretch()
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
         return w
+
+    def _toggle_advanced(self, btn):
+        self._advanced_visible = not self._advanced_visible
+        self._adv_widget.setVisible(self._advanced_visible)
+        btn.setText("⚙ Advanced ▾" if self._advanced_visible else "⚙ Advanced ▸")
 
     def _file_row(self, parent_layout, label: str, default_name: str, picker_slot):
         row = QHBoxLayout()
