@@ -59,6 +59,7 @@ try:
         QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit, QProgressBar,
         QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView,
         QMessageBox, QMenuBar, QStatusBar, QSplitter, QFrame, QInputDialog,
+        QScrollArea, QRadioButton,
         QDialog
     )
     from PySide6.QtCore import Qt, QSettings, Signal, QObject, QThread, QTimer
