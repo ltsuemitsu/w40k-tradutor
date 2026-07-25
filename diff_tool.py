@@ -312,6 +312,45 @@ def print_smart_report(result: dict, needs_work: list):
 
 # ─── MAIN ───
 
+# Flags that take a value (for positional-subcommand argv expansion)
+_VALUE_FLAGS = {"-o", "--out", "-g", "--glossary", "-t", "--translated", "--min-english"}
+
+
+def _expand_positional_subcommand(argv: List[str]) -> List[str]:
+    """Support the documented positional forms by translating them to flag style:
+      diff_tool.py update <old_en> <new_en> --out <delta.json>
+      diff_tool.py audit <en> <pt> [--out <problems.json>]
+    Flag-style invocation is returned unchanged.
+    """
+    if len(argv) < 2 or argv[1] not in ("update", "audit"):
+        return argv
+    mode = argv[1]
+    positional: List[str] = []
+    passthrough: List[str] = []
+    i = 2
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--out":
+            passthrough += ["-o", argv[i + 1] if i + 1 < len(argv) else ""]
+            i += 2
+        elif tok in _VALUE_FLAGS:
+            passthrough += [tok, argv[i + 1] if i + 1 < len(argv) else ""]
+            i += 2
+        elif tok.startswith("-"):
+            passthrough.append(tok)  # boolean flag
+            i += 1
+        else:
+            positional.append(tok)
+            i += 1
+    if mode == "update" and len(positional) >= 2:
+        old, new = positional[0], positional[1]  # README order: old first, new second
+        return [argv[0], "-i", new, "-i_antigo", old, "--update"] + passthrough
+    if mode == "audit" and len(positional) >= 2:
+        en, pt = positional[0], positional[1]
+        return [argv[0], "-i", en, "-t", pt, "--audit"] + passthrough
+    return argv
+
+
 def main():
     parser = argparse.ArgumentParser(description="Diff Tool — Análise inteligente de tradução")
     parser.add_argument("-i", "--input", required=True, help="Arquivo original (atual) do jogo")
@@ -324,7 +363,7 @@ def main():
     parser.add_argument("--smart-diff", action="store_true", help="Cenário 3: Preservação inteligente")
     parser.add_argument("--preview", action="store_true", help="Só mostra, não salva")
     parser.add_argument("--min-english", type=int, default=2)
-    args = parser.parse_args()
+    args = parser.parse_args(_expand_positional_subcommand(sys.argv)[1:])
 
     orig = load_json(args.input)
     if not orig:
@@ -337,8 +376,9 @@ def main():
     output_data = {"strings": {}}
 
     # ── Cenário 2: Update ──
-    if args.update and en_old and trans:
-        result = detect_update(orig, en_old, trans)
+    if args.update and en_old:
+        # pt_current is optional (kept for backward compat; unused by detect_update)
+        result = detect_update(orig, en_old, trans or {})
         print_update_report(result)
         
         # Gera arquivo apenas com UUIDs novos + modificados
@@ -394,7 +434,7 @@ def main():
     else:
         print("[ERR] Modo não reconhecido. Use --audit, --update ou --smart-diff")
         print("   --audit: precisa de -t (traduzido)")
-        print("   --update: precisa de -i_antigo e -t")
+        print("   --update: precisa de -i_antigo (-t opcional)")
         print("   --smart-diff: precisa de -t e -g (glossário)")
         return 1
 

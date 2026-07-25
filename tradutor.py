@@ -630,7 +630,11 @@ class TranslationEngine:
             from openai import OpenAI
             if not self.api_key:
                 logger.error("DEEPSEEK_API_KEY não configurada."); return False
-            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            # max_retries=1: o retry com backoff já existe no nível do batch
+            # (translate_batch). Sem isso, o SDK repete cada chamada 2x por
+            # dentro — em rate-limit, workers "paralelos" viram fila de sleeps.
+            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url,
+                                  max_retries=1)
             return True
         except ImportError:
             logger.error("pip install openai"); return False
@@ -930,7 +934,8 @@ def main():
                         help="Categorias do glossário a preservar (modo preserve)")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("-b","--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
-    parser.add_argument("-w","--workers", type=int, default=DEFAULT_MAX_WORKERS)
+    parser.add_argument("-w","--workers", type=int, default=None,
+                        help="Threads paralelas. Omitido/<=0 = auto (model profile).")
     parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
     parser.add_argument("--extract-every", type=int, default=0)
     parser.add_argument("--blacklist", help="JSON com lista de UUIDs (ou dict) para pular na tradução")
@@ -981,8 +986,10 @@ def main():
 
     if _HAVE_PROFILES and not args.no_profile:
         rid, _p = resolve_profile(args.model)
-        # Only auto-bump workers when user left CLI default
-        if args.workers == DEFAULT_MAX_WORKERS:
+        # Auto-bump só quando -w não foi passado (None) ou a GUI mandou
+        # "auto" (<=0). Um -w explícito é respeitado literalmente — é assim
+        # que os overrides de workers das Configurações chegam ao engine.
+        if args.workers is None or args.workers <= 0:
             profile_workers = recommended_workers(args.model)
             args.workers = profile_workers
         if args.save_every <= 0:
@@ -1001,6 +1008,14 @@ def main():
         if args.save_every > 0:
             profile_save_every = args.save_every
         logger.info("Model profiles disabled or missing — using CLI defaults.")
+
+    # Guard: CLI values <= 0 mean "auto" (GUI spins default to 0). Never let them
+    # reach ThreadPoolExecutor(max_workers=0) or the batch-size math.
+    if args.workers is None or args.workers <= 0:
+        args.workers = DEFAULT_MAX_WORKERS
+    if args.batch_size is None or args.batch_size <= 0:
+        args.batch_size = DEFAULT_BATCH_SIZE
+    # save_every is already normalized above (<=0 → model profile / 1).
 
     logger.info(
         f"Config: model={args.model} | mode={args.mode} | batch={args.batch_size} | "

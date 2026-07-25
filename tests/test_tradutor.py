@@ -403,5 +403,222 @@ class TestAtomicSave(unittest.TestCase):
                 self.assertEqual(json.load(f), {"a": 1})
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Execução paralela (Issue 1) — cliente OpenAI FAKE contando concorrência
+# ─────────────────────────────────────────────────────────────────────────────
+
+import threading
+import time
+import types
+
+import tradutor as _trad_module
+import w40k_preflight as _pf
+
+
+class _ConcurrencyHarness:
+    """Instala um módulo `openai` fake em sys.modules e roda tradutor.main()
+    contando o máximo de chamadas simultâneas em voo."""
+
+    def __init__(self):
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.calls = 0
+        self.client_kwargs = []
+        self._lock = threading.Lock()
+
+    def install(self):
+        harness = self
+
+        class _Completions:
+            def create(self, model, messages, temperature,
+                       response_format=None):
+                with harness._lock:
+                    harness.in_flight += 1
+                    harness.calls += 1
+                    harness.max_in_flight = max(harness.max_in_flight,
+                                                harness.in_flight)
+                try:
+                    time.sleep(0.05)  # latência simulada da API
+                    user = messages[-1]["content"]
+                    payload = user[user.index("```json\n") + 8:
+                                   user.rindex("\n```")]
+                    texts = json.loads(payload)
+                    msg = types.SimpleNamespace(
+                        message=types.SimpleNamespace(
+                            content=json.dumps([f"PT::{t}" for t in texts],
+                                               ensure_ascii=False)))
+                    return types.SimpleNamespace(choices=[msg])
+                finally:
+                    with harness._lock:
+                        harness.in_flight -= 1
+
+        class _FakeOpenAI:
+            def __init__(self, api_key=None, base_url=None, **kwargs):
+                harness.client_kwargs.append(dict(kwargs))
+                self.chat = types.SimpleNamespace(completions=_Completions())
+
+        fake = types.ModuleType("openai")
+        fake.OpenAI = _FakeOpenAI
+        sys.modules["openai"] = fake
+
+    def run_engine(self, strings: dict, extra_args: list,
+                   tmp: Path) -> int:
+        inp = tmp / "in.json"
+        out = tmp / "out.json"
+        inp.write_text(json.dumps({"strings": strings}), encoding="utf-8")
+        argv = ["tradutor.py", "-i", str(inp), "-o", str(out),
+                "--mode", "complete",
+                "--prescan-cache", str(tmp / "nada.json")] + extra_args
+        old_argv = sys.argv
+        sys.argv = argv
+        try:
+            return _trad_module.main()
+        finally:
+            sys.argv = old_argv
+
+
+def _mixed_strings(n_short, n_medium, n_long, n_xlong):
+    strings = {}
+    for i in range(n_short):
+        strings[f"s{i}"] = {"Offset": i, "Text": f"Hi {i}"}
+    for i in range(n_medium):
+        strings[f"m{i}"] = {"Offset": i, "Text": "M" * 100 + str(i)}
+    for i in range(n_long):
+        strings[f"l{i}"] = {"Offset": i, "Text": "L" * 500 + str(i)}
+    for i in range(n_xlong):
+        strings[f"x{i}"] = {"Offset": i, "Text": "X" * 1500 + str(i)}
+    return strings
+
+
+class TestParallelExecution(unittest.TestCase):
+    def setUp(self):
+        self._old_key = os.environ.get("DEEPSEEK_API_KEY")
+        os.environ["DEEPSEEK_API_KEY"] = "fake-key"
+        self.harness = _ConcurrencyHarness()
+        self.harness.install()
+
+    def tearDown(self):
+        if self._old_key is None:
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+        else:
+            os.environ["DEEPSEEK_API_KEY"] = self._old_key
+
+    def test_batches_run_in_parallel_with_profile_autobump(self):
+        """Sem -w (caminho do wizard): perfil flash → 8 workers, e batches
+        independentes realmente voam juntos (max concorrência == workers)."""
+        strings = _mixed_strings(200, 100, 30, 10)  # 8 batches no perfil
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = self.harness.run_engine(
+                strings, ["--model", "deepseek-v4-flash"], Path(tmp))
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.harness.calls, 8)   # 8 batches
+        self.assertEqual(self.harness.max_in_flight, 8)  # 8 workers
+
+    def test_explicit_workers_are_respected_literally(self):
+        """-w explícito NÃO sofre auto-bump — é assim que os overrides de
+        workers das Configurações chegam ao engine."""
+        strings = _mixed_strings(200, 100, 30, 10)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = self.harness.run_engine(
+                strings, ["--model", "deepseek-v4-flash", "-w", "3"],
+                Path(tmp))
+        self.assertEqual(rc, 0)
+        # Antes do fix, -w 3 == DEFAULT_MAX_WORKERS → auto-bump para 8.
+        self.assertEqual(self.harness.max_in_flight, 3)
+
+    def test_client_created_with_max_retries_1(self):
+        """Sem retry duplo: o backoff vive no nível do batch; o SDK não pode
+        re-tentar por dentro (workers paralelos viravam fila de sleeps)."""
+        strings = _mixed_strings(0, 60, 0, 0)  # 2 batches médios
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = self.harness.run_engine(
+                strings, ["--model", "deepseek-v4-flash", "-w", "2"],
+                Path(tmp))
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.harness.client_kwargs)
+        for kwargs in self.harness.client_kwargs:
+            self.assertEqual(kwargs.get("max_retries"), 1)
+
+
+class TestPrescanCacheConsumption(unittest.TestCase):
+    """Engine consome o cache do Pre-Scan (w40k_preflight.write_prescan_cache)
+    e pula a re-classificação: skip/eula/preserved marcados em O(1)."""
+
+    def test_engine_uses_prescan_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            gloss = tmp / "glossary.json"
+            gloss.write_text(json.dumps({"terms": [
+                _term("Voidship", "Voidship", "weapon", True),
+            ]}), encoding="utf-8")
+            inp = tmp / "in.json"
+            inp.write_text(json.dumps({"strings": {
+                "k-skip": {"Offset": 0, "Text": "TBD"},
+                "k-eula": {"Offset": 1, "Text": (
+                    "End User License Agreement. " + "legal terms " * 600)},
+                "k-pres": {"Offset": 2, "Text": "Voidship"},
+                "k-api": {"Offset": 3, "Text": "A narrative line."},
+            }}), encoding="utf-8")
+            cache = tmp / "prescan_cache.json"
+            counts = _pf.write_prescan_cache(inp, gloss, cache,
+                                             mode="preserve")
+            self.assertEqual(counts, {"PRESERVED": 1, "SKIP": 1, "EULA": 1})
+            shape = json.loads(cache.read_text(encoding="utf-8"))
+            self.assertIn("source_hash", shape)
+            self.assertEqual(shape["preserve_mode"], "preserve")
+            self.assertEqual(shape["buckets"]["PRESERVED"], ["k-pres"])
+
+            harness = _ConcurrencyHarness()
+            harness.install()
+            out = tmp / "out.json"
+            argv = ["tradutor.py", "-i", str(inp), "-o", str(out),
+                    "--mode", "preserve", "--dry-run",
+                    "--prescan-cache", str(cache),
+                    "--preserve-map", str(tmp / "pm.json"),
+                    "-g", str(gloss)]
+            old_argv = sys.argv
+            sys.argv = argv
+            try:
+                rc = _trad_module.main()
+            finally:
+                sys.argv = old_argv
+            self.assertEqual(rc, 0)
+            data = json.loads(out.read_text(encoding="utf-8"))["strings"]
+            self.assertEqual(data["k-skip"]["_skipped"], "prescan_skip")
+            self.assertEqual(data["k-eula"]["_skipped"], "eula")
+            self.assertTrue(data["k-pres"]["_preserved"])
+            self.assertNotIn("_failed", data["k-api"])
+
+    def test_stale_cache_is_ignored(self):
+        """source_hash divergente → engine ignora o cache (re-classifica)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            inp = tmp / "in.json"
+            inp.write_text(json.dumps({"strings": {
+                "k-skip": {"Offset": 0, "Text": "TBD"},
+            }}), encoding="utf-8")
+            cache = tmp / "prescan_cache.json"
+            cache.write_text(json.dumps({
+                "source_hash": "hash-de-outro-arquivo",
+                "preserve_mode": "preserve",
+                "buckets": {"PRESERVED": [], "SKIP": ["k-skip"], "EULA": []},
+            }), encoding="utf-8")
+            out = tmp / "out.json"
+            argv = ["tradutor.py", "-i", str(inp), "-o", str(out),
+                    "--mode", "preserve", "--dry-run",
+                    "--prescan-cache", str(cache),
+                    "--preserve-map", str(tmp / "pm.json")]
+            old_argv = sys.argv
+            sys.argv = argv
+            try:
+                rc = _trad_module.main()
+            finally:
+                sys.argv = old_argv
+            self.assertEqual(rc, 0)
+            data = json.loads(out.read_text(encoding="utf-8"))["strings"]
+            # Cache ignorado → classificação normal do engine ("placeholder").
+            self.assertEqual(data["k-skip"]["_skipped"], "placeholder")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,13 @@
   "metadata": {
     "version": "2.1",
     "updated_at": "2026-06-19T15:07:01.006152",
-    "total_terms": 2694
+    "total_terms": 2694,
+    "name": "Rogue Trader",
+    "game": "rogue_trader",
+    "game_version": null,
+    "kind": "base_game",
+    "mod_name": null,
+    "parent": null
   },
   "terms": [
     {
