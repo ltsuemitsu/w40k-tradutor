@@ -419,16 +419,23 @@ class TagProtector:
 class TermProtector:
     """Hard-lock glossary terms inside a phrase (same idea as TagProtector).
 
-    "Equip a Plasma Gun now." + ["Plasma Gun"]
-
-      → restore → "Equip a Plasma Gun now." after translation of the rest
+    Placeholders use plain ASCII [[W40KTn]] — LLMs mangle §TERM less often,
+    and restore also accepts legacy §TERM / $TERM forms.
     """
+
+    _PH_RE = re.compile(
+        r"\[\[W40KT(\d+)\]\]|§TERM(\d+)§|\$TERM(\d+)\$",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _ph_token(i: int) -> str:
+        return f"[[W40KT{i}]]"
 
     @staticmethod
     def protect(text: str, terms: List[str]) -> Tuple[str, Dict[str, str]]:
         if not text or not terms:
             return text, {}
-        # Longest first so "Plasma Gun" wins over "Gun" if both listed
         uniq = sorted({t for t in terms if t}, key=len, reverse=True)
         if not uniq:
             return text, {}
@@ -441,16 +448,120 @@ class TermProtector:
             return text, {}
         ph: Dict[str, str] = {}
         result = text
-        # Replace from the end so offsets stay valid
-        for i, m in enumerate(reversed(matches)):
-            p = f"§TERM{i}§"
-            ph[p] = m.group(0)  # keep original casing from source
+        # Replace from the end so offsets stay valid; index 0 = first left-to-right match
+        # Store both forward index (stable for LLM) via enumerate(matches) not reversed index
+        # Build left-to-right ids, apply right-to-left replacements
+        ltr = list(matches)
+        for i, m in enumerate(ltr):
+            ph[TermProtector._ph_token(i)] = m.group(0)
+        for i, m in enumerate(reversed(ltr)):
+            # reversed i → original index
+            orig_i = len(ltr) - 1 - i
+            p = TermProtector._ph_token(orig_i)
             result = result[: m.start()] + p + result[m.end() :]
         return result, ph
 
     @staticmethod
     def restore(text: str, ph: Dict[str, str]) -> str:
-        return TagProtector.restore(text, ph)
+        if not text or not ph:
+            return text
+        result = text
+        # 1) exact keys (TAG + TERM)
+        for p in sorted(ph.keys(), key=len, reverse=True):
+            if p in result:
+                result = result.replace(p, ph[p])
+        # 2) index map for term placeholders (handles LLM renumber / § vs $ vs [[ ]])
+        by_idx: Dict[int, str] = {}
+        for k, v in ph.items():
+            m = re.search(r"(?:W40KT|TERM)(\d+)", k, re.I)
+            if m:
+                by_idx[int(m.group(1))] = v
+
+        def _repl(m: re.Match) -> str:
+            idx = m.group(1) or m.group(2) or m.group(3)
+            if idx is None:
+                return m.group(0)
+            return by_idx.get(int(idx), m.group(0))
+
+        result = TermProtector._PH_RE.sub(_repl, result)
+        # 3) leftover term ph → drop empty rather than show junk (last resort)
+        result = re.sub(r"\[\[W40KT\d+\]\]|§TERM\d+§|\$TERM\d+\$", "", result)
+        return result
+
+
+# ─── Gender tags {mf|male|female} / {rt_mf|…} ───
+# Game picks side by PC sex. BOTH sides must be PT — never leave him/her.
+
+_MF_PAIR_MAP = {
+    # pronouns
+    ("he", "she"): ("ele", "ela"),
+    ("him", "her"): ("ele", "ela"),
+    ("his", "her"): ("seu", "sua"),
+    ("his", "hers"): ("dele", "dela"),
+    ("himself", "herself"): ("si mesmo", "si mesma"),
+    # titles
+    ("lord", "lady"): ("lorde", "lady"),
+    ("lordship", "ladyship"): ("senhoria", "senhoria"),
+    ("his lordship", "her ladyship"): ("sua senhoria", "sua senhoria"),
+    ("his lord", "her lady"): ("seu lorde", "sua lady"),
+    ("master", "mistress"): ("mestre", "mestra"),
+    ("sir", "ma'am"): ("senhor", "senhora"),
+    ("sir", "lady"): ("senhor", "lady"),
+    ("m'lord", "m'lady"): ("milorde", "milady"),
+    ("man", "woman"): ("homem", "mulher"),
+    ("boy", "girl"): ("rapaz", "moça"),
+    ("brother", "sister"): ("irmão", "irmã"),
+    ("layman", "laywoman"): ("leigo", "leiga"),
+    ("lordiness", "ladyness"): ("senhoria", "senhoria"),
+    ("lordliness", "ladyness"): ("senhoria", "senhoria"),
+    # broken partials sometimes seen
+    ("im", "er"): ("ele", "ela"),
+    ("is", "er"): ("seu", "sua"),
+}
+
+
+def _mf_case_match(src: str, dst: str) -> str:
+    """Apply src casing style onto dst."""
+    if not src:
+        return dst
+    if src.isupper():
+        return dst.upper()
+    if src[0].isupper():
+        return dst[:1].upper() + dst[1:] if dst else dst
+    return dst
+
+
+def localize_gender_tags(text: str) -> str:
+    """Translate both sides of {mf|a|b} / {rt_mf|a|b} using a fixed pair map."""
+    if not text or "{mf|" not in text.lower() and "{rt_mf|" not in text.lower():
+        # fast path
+        if "{mf|" not in text and "{rt_mf|" not in text:
+            return text
+
+    def repl(m: re.Match) -> str:
+        prefix = m.group(1)  # mf or rt_mf
+        a, b = m.group(2), m.group(3)
+        key = (a.lower(), b.lower())
+        if key in _MF_PAIR_MAP:
+            pa, pb = _MF_PAIR_MAP[key]
+            return "{" + prefix + "|" + _mf_case_match(a, pa) + "|" + _mf_case_match(b, pb) + "}"
+        # already non-English-looking sides — leave
+        return m.group(0)
+
+    return re.sub(
+        r"\{(mf|rt_mf)\|([^|}]+)\|([^}]+)\}",
+        repl,
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def scrub_leaked_term_placeholders(text: str) -> str:
+    """Remove any leftover term locks that escaped restore."""
+    if not text:
+        return text
+    return re.sub(r"\[\[W40KT\d+\]\]|§TERM\d+§|\$TERM\d+\$", "", text)
+
 
 
 def fullize_text(text: str, en_to_pt: Dict[str, str]) -> str:
@@ -795,6 +906,10 @@ def process_batch(batch: List[Tuple[str,dict]], system_prompt: str, model: str, 
         data: Dict[str, dict] = {}
         for i, key in enumerate(keys):
             restored = TagProtector.restore(translated[i], ph_list[i])
+            # Term locks may use [[W40KTn]] / legacy §TERM — restore via combined ph
+            restored = TermProtector.restore(restored, ph_list[i])
+            restored = localize_gender_tags(restored)
+            restored = scrub_leaked_term_placeholders(restored)
             data[key] = {"Offset": offsets[i], "Text": restored}
         return data
     except Exception as e:

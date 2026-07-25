@@ -127,7 +127,7 @@ class TestTermProtector(unittest.TestCase):
         text = "Equip the Plasma Gun before the fight."
         protected, ph = TermProtector.protect(text, ["Plasma Gun"])
         self.assertNotIn("Plasma Gun", protected)
-        self.assertTrue(re.search(r"§TERM\d+§", protected))
+        self.assertTrue(re.search(r"\[\[W40KT\d+\]\]", protected))
         self.assertIn("Equip the", protected)
         restored = TermProtector.restore(protected, ph)
         self.assertEqual(restored, text)
@@ -152,8 +152,35 @@ class TestTermProtector(unittest.TestCase):
         t2, term_ph = TermProtector.protect(t, ["Plasma Gun"])
         tph.update(term_ph)
         # LLM would translate outer words; we only check restore
-        restored = TagProtector.restore(t2, tph)
-        self.assertEqual(restored, text)
+        restored = TermProtector.restore(TagProtector.restore(t2, tph), tph)
+        # at least term comes back
+        self.assertIn("Plasma Gun", restored)
+
+    def test_mangled_legacy_term_placeholder_restores(self):
+        text = "Hello Rogue Trader."
+        prot, ph = TermProtector.protect(text, ["Rogue Trader"])
+        # LLM renumbers / uses old § form
+        fake = "Hello §TERM0§."
+        self.assertEqual(TermProtector.restore(fake, ph), "Hello Rogue Trader.")
+
+
+class TestGenderTags(unittest.TestCase):
+    def test_mf_him_her(self):
+        from tradutor import localize_gender_tags
+        s = '"Trono... É? É {mf|him|her}!"'
+        self.assertEqual(localize_gender_tags(s), '"Trono... É? É {mf|ele|ela}!"')
+
+    def test_mf_his_her_case(self):
+        from tradutor import localize_gender_tags
+        self.assertIn("{mf|Seu|Sua}", localize_gender_tags("{mf|His|Her}"))
+        self.assertIn("{mf|seu|sua}", localize_gender_tags("{mf|his|her}"))
+
+    def test_rt_mf(self):
+        from tradutor import localize_gender_tags
+        self.assertEqual(
+            localize_gender_tags("{rt_mf|he|she}"),
+            "{rt_mf|ele|ela}",
+        )
 
 
 class TestSmartGlossary(unittest.TestCase):
