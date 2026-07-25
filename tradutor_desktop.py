@@ -575,77 +575,61 @@ class W40kTranslatorGUI(QMainWindow):
     # TAB: TRANSLATE (dual-track: Preserved + Full)
     # ───────────────────────────────
     def _create_translate_tab(self) -> QWidget:
+        """Guided dual-track flow — single scroll, numbered steps."""
         w = QWidget()
         outer = QVBoxLayout(w)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(4)
+        outer.setSpacing(0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         body = QWidget()
         layout = QVBoxLayout(body)
-        layout.setSpacing(6)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
 
-        # Guide
-        guide = QLabel(
-            "<b>Dual-track</b> — Pre-Scan (free) → Preserve translation → Fullize (free)"
-        )
-        guide.setWordWrap(True)
-        guide.setStyleSheet(
-            "background:#1a1520; border:1px solid #3a3040; border-radius:6px; "
-            "padding:8px; color:#e8dcc8;"
-        )
-        layout.addWidget(guide)
+        self._wizard_state = {
+            "prescan_loaded": False,
+            "prescan_summary": {},
+            "mode": "fresh",
+            "work_input": "",
+            "glossary_audited": False,
+        }
 
-        # Files
-        files_g = QGroupBox("Files")
-        fl = QVBoxLayout(files_g)
-        fl.setSpacing(3)
-        self.tr_input = self._file_row(fl, "Input (EN)", "data/en/enGB.json", self._pick_input)
-        self.tr_output = self._file_row(fl, "Output Preserved PT", "data/pt/ptBR_preserved.json", self._pick_output)
-        self.tr_full_output = self._file_row(fl, "Output Full PT", "data/pt/ptBR_full.json", self._pick_output)
-        self.tr_glossary = self._file_row(fl, "Glossary", "glossary.json", self._pick_glossary)
-        self.tr_blacklist = self._file_row(fl, "Blacklist (opt)", "data/blacklists/blacklist_eula.json", self._pick_blacklist)
-        self.tr_preserve_map = self._file_row(fl, "Preserve Map (auto)", "preserve_map.json", self._pick_preserve_map)
+        # ═══ STEP 1: Files & API ═══
+        s1 = QGroupBox("Step 1 — Files & API")
+        s1l = QVBoxLayout(s1)
+        s1l.setSpacing(3)
+        self.tr_input = self._file_row(s1l, "English source (enGB)", "data/en/enGB_new.json", self._pick_input)
+        self.tr_output = self._file_row(s1l, "Output — Preserved PT", "data/pt/ptBR_preserved.json", self._pick_output)
+        self.tr_full_output = self._file_row(s1l, "Output — Full PT", "data/pt/ptBR_full.json", self._pick_output)
+        self.tr_glossary = self._file_row(s1l, "Glossary", "glossary.json", self._pick_glossary)
+        self.tr_blacklist = self._file_row(s1l, "Blacklist (auto from Pre-Scan)", "data/blacklists/blacklist_eula.json", self._pick_blacklist)
+        self.tr_preserve_map = self._file_row(s1l, "Preserve map (auto)", "preserve_map.json", self._pick_preserve_map)
 
-        row_tools = QHBoxLayout()
-        prescan_btn = QPushButton("Pre-Scan (FREE)")
-        prescan_btn.clicked.connect(self._prescan_source)
-        row_tools.addWidget(prescan_btn)
-        bl_btn = QPushButton("Blacklist builder…")
-        bl_btn.clicked.connect(self._build_blacklist_interactive)
-        row_tools.addWidget(bl_btn)
-        fl.addLayout(row_tools)
-        layout.addWidget(files_g)
-
-        # API + Model (compact, single row each)
-        api_g = QGroupBox("API & Model")
-        api_l = QVBoxLayout(api_g)
-        api_l.setSpacing(4)
-
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Provider:"))
+        # API row
+        api_row = QHBoxLayout()
         self.provider_combo = QComboBox()
         self.provider_combo.addItems(["DeepSeek", "Zhipu GLM", "Kimi (Coding)", "Custom"])
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
-        row1.addWidget(self.provider_combo)
-        row1.addWidget(QLabel("Key:"))
+        api_row.addWidget(QLabel("Provider:"))
+        api_row.addWidget(self.provider_combo)
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
-        self.api_key_edit.setPlaceholderText("env var if empty")
+        self.api_key_edit.setPlaceholderText("API key (env if empty)")
         self.api_key_edit.textChanged.connect(self._on_api_key_changed)
-        row1.addWidget(self.api_key_edit, 1)
+        api_row.addWidget(self.api_key_edit, 1)
         self.save_key_cb = QCheckBox("Keychain")
         self.save_key_cb.stateChanged.connect(self._on_save_key_toggled)
-        row1.addWidget(self.save_key_cb)
-        api_l.addLayout(row1)
+        api_row.addWidget(self.save_key_cb)
+        s1l.addLayout(api_row)
 
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("URL:"))
+        # URL + Model row
+        url_row = QHBoxLayout()
         self.base_url_edit = QLineEdit("https://api.deepseek.com")
-        row2.addWidget(self.base_url_edit, 1)
-        row2.addWidget(QLabel("Model:"))
+        url_row.addWidget(QLabel("URL:"))
+        url_row.addWidget(self.base_url_edit, 1)
         self.model_edit = QComboBox()
         self.model_edit.setEditable(True)
         self.model_edit.addItems([
@@ -658,17 +642,109 @@ class W40kTranslatorGUI(QMainWindow):
         self.model_edit.setCurrentText("deepseek-v4-flash")
         self.model_edit.setMinimumWidth(160)
         self.model_edit.currentTextChanged.connect(self._on_model_changed_profile)
-        row2.addWidget(self.model_edit)
-        api_l.addLayout(row2)
+        url_row.addWidget(QLabel("Model:"))
+        url_row.addWidget(self.model_edit)
+        s1l.addLayout(url_row)
 
         self.profile_label = QLabel("")
         self.profile_label.setWordWrap(True)
         self.profile_label.setStyleSheet("color:#8a7560; font-size:11px;")
-        api_l.addWidget(self.profile_label)
-        layout.addWidget(api_g)
+        s1l.addWidget(self.profile_label)
+        layout.addWidget(s1)
         QTimer.singleShot(0, self._refresh_profile_label)
 
-        # Preserve + dry run
+        # ═══ STEP 2: Glossary ═══
+        s2 = QGroupBox("Step 2 — Glossary")
+        s2l = QVBoxLayout(s2)
+        s2l.setSpacing(4)
+        self.gloss_audit_label = QLabel("Not audited yet.")
+        self.gloss_audit_label.setWordWrap(True)
+        self.gloss_audit_label.setStyleSheet("color:#8a7560;")
+        s2l.addWidget(self.gloss_audit_label)
+
+        g_row1 = QHBoxLayout()
+        btn_audit = QPushButton("Audit (FREE)")
+        btn_audit.setToolTip("Count terms, preserve flags, missing PT.")
+        btn_audit.clicked.connect(self._wizard_audit_glossary)
+        g_row1.addWidget(btn_audit)
+        btn_cand = QPushButton("Find candidates (FREE)")
+        btn_cand.setToolTip("Multi-word terms NOT already in glossary.")
+        btn_cand.clicked.connect(self._wizard_glossary_candidates)
+        g_row1.addWidget(btn_cand)
+        s2l.addLayout(g_row1)
+
+        g_row2 = QHBoxLayout()
+        btn_rev = QPushButton("Review & translate candidates")
+        btn_rev.setToolTip("Table → LLM translate selected NEW → merge into glossary.")
+        btn_rev.clicked.connect(self._wizard_review_translate_candidates)
+        g_row2.addWidget(btn_rev)
+        btn_ai_audit = QPushButton("AI audit (polysemes)")
+        btn_ai_audit.setToolTip("LLM reviews existing glossary for polysemes/bad PT.")
+        btn_ai_audit.clicked.connect(self._wizard_ai_audit_glossary)
+        g_row2.addWidget(btn_ai_audit)
+        s2l.addLayout(g_row2)
+
+        g_row3 = QHBoxLayout()
+        btn_wiki_pt = QPushButton("Translate missing wiki PT")
+        btn_wiki_pt.setToolTip("Only entries still EN=PT or empty. Skips already-PT.")
+        btn_wiki_pt.clicked.connect(self._wizard_translate_missing_wiki_pt)
+        g_row3.addWidget(btn_wiki_pt)
+        self.gloss_force_cb = QCheckBox("Force re-translate")
+        self.gloss_force_cb.setToolTip("OFF = skip terms that already have PT.")
+        g_row3.addWidget(self.gloss_force_cb)
+        s2l.addLayout(g_row3)
+        layout.addWidget(s2)
+
+        # ═══ STEP 3: Job type ═══
+        s3 = QGroupBox("Step 3 — Job type")
+        s3l = QVBoxLayout(s3)
+        s3l.setSpacing(4)
+        self.mode_fresh_rb = QRadioButton("FRESH — translate full English file")
+        self.mode_update_rb = QRadioButton("UPDATE — only new/changed strings (needs old + new EN)")
+        self.mode_fresh_rb.setChecked(True)
+        self.mode_fresh_rb.toggled.connect(self._wizard_on_mode_changed)
+        s3l.addWidget(self.mode_fresh_rb)
+        s3l.addWidget(self.mode_update_rb)
+
+        self.tr_old_en = self._file_row(s3l, "OLD English", "data/en/enGB_old.json", self._pick_input)
+        self.tr_new_en = self._file_row(s3l, "NEW English", "data/en/enGB_new.json", self._pick_input)
+        self.tr_delta_out = self._file_row(s3l, "Delta file (auto)", "data/delta_en.json", self._pick_output)
+
+        self.mode_hint = QLabel("Work input = full English source above.")
+        self.mode_hint.setWordWrap(True)
+        self.mode_hint.setStyleSheet("color:#8a7560; font-size:11px;")
+        s3l.addWidget(self.mode_hint)
+        self._btn_build_delta = QPushButton("Build delta (FREE)")
+        self._btn_build_delta.clicked.connect(self._wizard_build_delta)
+        self._btn_build_delta.setEnabled(False)
+        s3l.addWidget(self._btn_build_delta)
+        layout.addWidget(s3)
+
+        # ═══ STEP 4: Pre-Scan ═══
+        s4 = QGroupBox("Step 4 — Pre-Scan plan")
+        s4l = QVBoxLayout(s4)
+        s4l.setSpacing(4)
+        self.prescan_plan_badge = QLabel("Plan not loaded — run Pre-Scan before translating.")
+        self.prescan_plan_badge.setWordWrap(True)
+        self.prescan_plan_badge.setStyleSheet(
+            "background:#2a1a1a; border:1px solid #6a3030; border-radius:6px; "
+            "padding:8px; color:#e8b0b0;"
+        )
+        s4l.addWidget(self.prescan_plan_badge)
+        ps_row = QHBoxLayout()
+        btn_ps = QPushButton("Run Pre-Scan (FREE)")
+        btn_ps.clicked.connect(self._prescan_source)
+        ps_row.addWidget(btn_ps)
+        btn_reload = QPushButton("Reload from cache")
+        btn_reload.clicked.connect(self._wizard_reload_prescan_cache)
+        ps_row.addWidget(btn_reload)
+        s4l.addLayout(ps_row)
+        layout.addWidget(s4)
+
+        # ═══ STEP 5: Translate ═══
+        s5 = QGroupBox("Step 5 — Translate")
+        s5l = QVBoxLayout(s5)
+        s5l.setSpacing(4)
         mode_row = QHBoxLayout()
         self.preserve_toggle = QCheckBox("Preserve wiki & mechanics (recommended)")
         self.preserve_toggle.setChecked(True)
@@ -676,67 +752,670 @@ class W40kTranslatorGUI(QMainWindow):
         self.dry_run_cb = QCheckBox("Dry run")
         mode_row.addWidget(self.dry_run_cb)
         mode_row.addStretch()
-        layout.addLayout(mode_row)
+        s5l.addLayout(mode_row)
 
-        # Advanced (collapsed by default)
-        self._advanced_visible = False
-        adv_toggle = QPushButton("⚙ Advanced ▸")
-        adv_toggle.setFlat(True)
-        adv_toggle.setStyleSheet("text-align:left; color:#8a7560; padding:2px;")
-        adv_toggle.clicked.connect(lambda: self._toggle_advanced(adv_toggle))
-        layout.addWidget(adv_toggle)
+        self.run_hint = QLabel("Run Pre-Scan first (Step 4), then press START below.")
+        self.run_hint.setWordWrap(True)
+        self.run_hint.setStyleSheet("color:#8a7560; font-size:11px;")
+        s5l.addWidget(self.run_hint)
 
-        self._adv_widget = QWidget()
-        adv_l = QHBoxLayout(self._adv_widget)
-        adv_l.setContentsMargins(20, 0, 0, 0)
-        adv_l.addWidget(QLabel("Batch:"))
+        # Hidden engine knobs (referenced by _start_translation)
         self.batch_spin = QSpinBox(); self.batch_spin.setRange(1, 50); self.batch_spin.setValue(10)
-        adv_l.addWidget(self.batch_spin)
-        adv_l.addWidget(QLabel("Workers:"))
         self.workers_spin = QSpinBox(); self.workers_spin.setRange(0, 16); self.workers_spin.setValue(0)
-        self.workers_spin.setToolTip("0 = auto from profile")
-        adv_l.addWidget(self.workers_spin)
-        adv_l.addWidget(QLabel("Temp:"))
+        self.workers_spin.setToolTip("0 = auto from model profile")
         self.temp_spin = QDoubleSpinBox(); self.temp_spin.setRange(0.0, 1.0); self.temp_spin.setValue(0.15)
-        adv_l.addWidget(self.temp_spin)
-        self.auto_extract_cb = QCheckBox("Auto-extract")
-        adv_l.addWidget(self.auto_extract_cb)
-        self._adv_widget.setVisible(False)
-        layout.addWidget(self._adv_widget)
+        self.auto_extract_cb = QCheckBox(); self.auto_extract_cb.setChecked(False)
 
-        # Actions
-        action_layout = QHBoxLayout()
-        self.translate_btn = QPushButton("▶ 1) START PRESERVE TRANSLATION")
+        act = QHBoxLayout()
+        self.translate_btn = QPushButton("START PRESERVE TRANSLATION")
         self.translate_btn.setObjectName("primary")
-        self.translate_btn.clicked.connect(lambda: self._start_translation(optimized=True))
-        action_layout.addWidget(self.translate_btn)
-
-        self.fullize_btn = QPushButton("✨ 2) FULLIZE (FREE)")
+        self.translate_btn.clicked.connect(self._wizard_start_preserve)
+        act.addWidget(self.translate_btn)
+        self.fullize_btn = QPushButton("FULLIZE (FREE)")
         self.fullize_btn.setObjectName("primary")
         self.fullize_btn.clicked.connect(self._start_fullize)
-        action_layout.addWidget(self.fullize_btn)
+        act.addWidget(self.fullize_btn)
+        s5l.addLayout(act)
 
+        act2 = QHBoxLayout()
         self.dryrun_quick_btn = QPushButton("Dry Run")
-        self.dryrun_quick_btn.clicked.connect(
-            lambda: (self.dry_run_cb.setChecked(True), self._start_translation(optimized=True))
-        )
-        action_layout.addWidget(self.dryrun_quick_btn)
-
-        self.retranslate_btn = QPushButton("Advanced…")
-        self.retranslate_btn.setToolTip("Legacy LLM 2nd pass. Prefer Fullize.")
+        self.dryrun_quick_btn.clicked.connect(self._wizard_dry_run)
+        act2.addWidget(self.dryrun_quick_btn)
+        self.skip_to_full_btn = QPushButton("Skip preserve (full only)")
+        self.skip_to_full_btn.clicked.connect(self._wizard_start_full_only)
+        act2.addWidget(self.skip_to_full_btn)
+        self.retranslate_btn = QPushButton("Advanced...")
         self.retranslate_btn.clicked.connect(self._start_second_pass)
-        action_layout.addWidget(self.retranslate_btn)
-        layout.addLayout(action_layout)
+        act2.addWidget(self.retranslate_btn)
+        s5l.addLayout(act2)
+
+        self.result_label = QLabel("")
+        self.result_label.setWordWrap(True)
+        s5l.addWidget(self.result_label)
+        layout.addWidget(s5)
 
         layout.addStretch()
         scroll.setWidget(body)
         outer.addWidget(scroll)
+
+        QTimer.singleShot(0, self._wizard_hide_update_rows)
+        QTimer.singleShot(100, self._wizard_reload_prescan_cache)
         return w
 
-    def _toggle_advanced(self, btn):
-        self._advanced_visible = not self._advanced_visible
-        self._adv_widget.setVisible(self._advanced_visible)
-        btn.setText("⚙ Advanced ▾" if self._advanced_visible else "⚙ Advanced ▸")
+    def _wizard_hide_update_rows(self):
+        self._wizard_set_update_rows_visible(False)
+        self._wizard_on_mode_changed()
+
+    def _wizard_set_update_rows_visible(self, visible: bool):
+        for edit in (getattr(self, "tr_old_en", None), getattr(self, "tr_new_en", None), getattr(self, "tr_delta_out", None)):
+            if edit is None:
+                continue
+            row = getattr(edit, "_row_widget", None) or edit.parentWidget()
+            if row is not None:
+                row.setVisible(visible)
+
+    def _wizard_on_mode_changed(self, *_args):
+        is_update = bool(getattr(self, "mode_update_rb", None) and self.mode_update_rb.isChecked())
+        self._wizard_state["mode"] = "update" if is_update else "fresh"
+        self._wizard_set_update_rows_visible(is_update)
+        if hasattr(self, "_btn_build_delta"):
+            self._btn_build_delta.setEnabled(is_update)
+        self._wizard_refresh_work_input_hint()
+
+    def _wizard_refresh_work_input_hint(self):
+        mode = self._wizard_state.get("mode", "fresh")
+        if mode == "update" and self.tr_delta_out.text().strip() and os.path.exists(self.tr_delta_out.text().strip()):
+            wi = self.tr_delta_out.text().strip()
+            self._wizard_state["work_input"] = wi
+            self.mode_hint.setText(f"Work input = DELTA: {wi}")
+        else:
+            wi = self.tr_input.text().strip()
+            self._wizard_state["work_input"] = wi
+            if mode == "fresh":
+                self.mode_hint.setText(f"Work input = FULL EN: {wi or '(pick file)'}")
+
+    def _wizard_effective_input(self) -> str:
+        self._wizard_refresh_work_input_hint()
+        return self._wizard_state.get("work_input") or self.tr_input.text().strip()
+
+    def _wizard_glossary_path(self) -> str:
+        p = self.tr_glossary.text().strip() if hasattr(self, "tr_glossary") else ""
+        if (not p or not os.path.exists(p)) and hasattr(self, "glossary_path_edit"):
+            p = self.glossary_path_edit.text().strip()
+        return p
+
+    def _wizard_audit_glossary(self):
+        path_g = self.tr_glossary.text().strip()
+        if not path_g or not os.path.exists(path_g):
+            QMessageBox.warning(self, "No glossary", "Pick a glossary.json first.")
+            return
+        try:
+            data = json.load(open(path_g, encoding="utf-8"))
+            terms = data.get("terms") or data.get("entries") or []
+            if isinstance(terms, dict):
+                terms = list(terms.values())
+            n = len(terms)
+            preserve = 0
+            missing_pt = 0
+            inline_off = 0
+            for t in terms:
+                if not isinstance(t, dict):
+                    continue
+                if t.get("preserve") or (t.get("category") or "").lower() in {
+                    c.lower() for c in __import__("tradutor", fromlist=["DEFAULT_PRESERVE_CATS"]).DEFAULT_PRESERVE_CATS
+                }:
+                    preserve += 1
+                pt = (t.get("term_translated") or t.get("pt") or "").strip()
+                en = (t.get("term_english") or t.get("en") or "").strip()
+                if en and (not pt or pt == en):
+                    missing_pt += 1
+                if t.get("inline") is False:
+                    inline_off += 1
+            self.gloss_audit_label.setText(
+                f"OK — {n:,} terms | preserve~{preserve:,} | missing PT {missing_pt:,} | inline:false {inline_off}"
+            )
+            self._wizard_state["glossary_audited"] = True
+            self._append_log(f"[GLOSSARY AUDIT] {n} terms, preserve~{preserve}, missing_pt={missing_pt}")
+        except Exception as e:
+            QMessageBox.critical(self, "Audit failed", str(e))
+
+    def _wizard_glossary_candidates(self):
+        en_path = self._wizard_effective_input() or self.tr_input.text().strip()
+        g_path = self._wizard_glossary_path()
+        if not en_path or not os.path.exists(en_path):
+            QMessageBox.warning(self, "No EN file", "Set English source first.")
+            return
+        if not g_path or not os.path.exists(g_path):
+            QMessageBox.warning(self, "No glossary", "Set glossary first.")
+            return
+        try:
+            from tradutor import SmartGlossary, DEFAULT_PRESERVE_CATS
+            g = SmartGlossary(g_path, "preserve", set(DEFAULT_PRESERVE_CATS))
+            known = set(g.entries.keys())
+            src = json.load(open(en_path, encoding="utf-8"))
+            strings = src.get("strings") or {}
+            pat = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9]+){1,4})\b")
+            counts = {}
+            for rec in strings.values():
+                text = (rec.get("Text") or "") if isinstance(rec, dict) else ""
+                if len(text) < 4 or len(text) > 400:
+                    continue
+                for m in pat.finditer(text):
+                    term = m.group(1).strip()
+                    if term.lower() in known:
+                        continue
+                    if term.lower() in {"the", "and", "for"}:
+                        continue
+                    counts[term] = counts.get(term, 0) + 1
+            ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:200]
+            out = "data/glossary_candidates.json"
+            os.makedirs("data", exist_ok=True)
+            payload = {
+                "source": os.path.abspath(en_path),
+                "glossary": os.path.abspath(g_path),
+                "count": len(ranked),
+                "candidates": [{"en": t, "hits": h} for t, h in ranked],
+            }
+            with open(out, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            self.gloss_audit_label.setText(
+                f"Candidates: {len(ranked)} new terms -> {out}. Next: Review & translate."
+            )
+            self._append_log(f"[CANDIDATES] {len(ranked)} terms -> {out}")
+            reply = QMessageBox.question(
+                self, "Candidates ready",
+                f"{len(ranked)} candidate terms saved.\nOpen Review & translate now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                self._wizard_review_translate_candidates()
+        except Exception as e:
+            QMessageBox.critical(self, "Candidates failed", str(e))
+
+    def _wizard_llm_glossary(self):
+        src = self._wizard_effective_input() or self.tr_input.text().strip()
+        gloss = self._wizard_glossary_path()
+        if not src or not gloss:
+            QMessageBox.warning(self, "Missing paths", "Set EN source + glossary first.")
+            return
+        self._start_ai_extraction_step(src, gloss)
+
+    def _wizard_translate_missing_wiki_pt(self):
+        g = self._wizard_glossary_path()
+        if not g or not os.path.exists(g):
+            QMessageBox.warning(self, "No glossary", "Set glossary path first.")
+            return
+        if hasattr(self, "glossary_path_edit"):
+            self.glossary_path_edit.setText(g)
+        self._wizard_state["force_wiki_pt"] = bool(
+            getattr(self, "gloss_force_cb", None) and self.gloss_force_cb.isChecked()
+        )
+        self._translate_wiki_terms()
+
+    def _wizard_review_translate_candidates(self):
+        cand_path = "data/glossary_candidates.json"
+        if not os.path.exists(cand_path):
+            QMessageBox.warning(self, "No candidates", "Run Find candidates first.")
+            return
+        g_path = self._wizard_glossary_path()
+        if not g_path or not os.path.exists(g_path):
+            QMessageBox.warning(self, "No glossary", "Set glossary path first.")
+            return
+        cfg = self._get_api_config()
+        if not cfg.get("api_key"):
+            QMessageBox.warning(self, "No API key", "Configure API first.")
+            return
+        payload = json.load(open(cand_path, encoding="utf-8"))
+        candidates = payload.get("candidates") or []
+        if not candidates:
+            QMessageBox.information(self, "Empty", "No candidates.")
+            return
+        gdata = json.load(open(g_path, encoding="utf-8"))
+        terms = gdata.get("terms") or []
+        if not isinstance(terms, list):
+            terms = list(terms.values()) if isinstance(terms, dict) else []
+        known = {}
+        for t in terms:
+            if not isinstance(t, dict):
+                continue
+            en = (t.get("term_english") or t.get("en") or "").strip().lower()
+            if en:
+                known[en] = t
+        force = bool(getattr(self, "gloss_force_cb", None) and self.gloss_force_cb.isChecked())
+        rows = []
+        skipped_done = 0
+        for c in candidates:
+            en = (c.get("en") or "").strip()
+            if not en:
+                continue
+            hits = int(c.get("hits") or 0)
+            existing = known.get(en.lower())
+            status = "NEW"
+            default_on = True
+            if existing:
+                pt = (existing.get("term_translated") or "").strip()
+                en0 = (existing.get("term_english") or "").strip()
+                if pt and pt.lower() != en0.lower() and not force:
+                    skipped_done += 1
+                    continue
+                status = "IN GLOSSARY (empty PT)" if not force else "FORCE"
+                default_on = force
+            rows.append({"en": en, "hits": hits, "status": status, "on": default_on, "existing": existing})
+        if not rows:
+            QMessageBox.information(self, "Nothing to do", f"All skipped ({skipped_done}). Enable Force.")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Review candidates ({len(rows)}, skipped {skipped_done})")
+        dlg.resize(720, 500)
+        lay = QVBoxLayout(dlg)
+        table = QTableWidget(len(rows), 4)
+        table.setHorizontalHeaderLabels(["Use", "EN term", "Hits", "Status"])
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        for i, r in enumerate(rows):
+            cb = QTableWidgetItem()
+            cb.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            cb.setCheckState(Qt.Checked if r["on"] else Qt.Unchecked)
+            table.setItem(i, 0, cb)
+            table.setItem(i, 1, QTableWidgetItem(r["en"]))
+            table.setItem(i, 2, QTableWidgetItem(str(r["hits"])))
+            table.setItem(i, 3, QTableWidgetItem(r["status"]))
+        lay.addWidget(table)
+        go = QPushButton("Translate checked -> merge into glossary")
+        go.setObjectName("primary")
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(dlg.reject)
+        btns = QHBoxLayout()
+        btns.addWidget(go)
+        btns.addWidget(cancel)
+        lay.addLayout(btns)
+        def do_translate():
+            selected = []
+            for i, r in enumerate(rows):
+                it = table.item(i, 0)
+                if it and it.checkState() == Qt.Checked:
+                    selected.append(r)
+            if not selected:
+                return
+            dlg.accept()
+            self._run_candidate_translation(selected, g_path, gdata, terms)
+        go.clicked.connect(do_translate)
+        dlg.exec()
+
+    def _run_candidate_translation(self, selected, g_path, gdata, terms_list):
+        work = []
+        for r in selected:
+            if r.get("existing") and isinstance(r["existing"], dict):
+                t = r["existing"]
+                t["_orig_pt"] = t.get("term_translated", "")
+                work.append(t)
+            else:
+                work.append({
+                    "term_english": r["en"], "term_translated": "",
+                    "preserve": True, "inline": True, "category": "candidate",
+                    "source": "candidate_scan", "_orig_pt": "", "_is_new": True,
+                })
+        cfg = self._get_api_config()
+        self._append_log(f"=== Translating {len(work)} candidates ===")
+        self.progress.setValue(0)
+        self.cancel_btn.setEnabled(True)
+        self._wiki_worker = WikiTranslateWorker(
+            work, cfg["model"], cfg["api_key"], cfg["provider"], cfg["base_url"], batch_size=30
+        )
+        worker = self._wiki_worker
+        worker.log.connect(self._append_log)
+        worker.progress.connect(lambda cur, tot, msg: self.progress.setValue(int(cur / max(tot, 1) * 100)))
+        def on_finished(success, message):
+            self.cancel_btn.setEnabled(False)
+            if not success:
+                QMessageBox.warning(self, "Failed", message)
+                return
+            existing_keys = {(t.get("term_english") or "").strip().lower() for t in terms_list if isinstance(t, dict)}
+            added = 0
+            updated = 0
+            for t in work:
+                en = (t.get("term_english") or "").strip()
+                pt = (t.get("term_translated") or "").strip()
+                if "_orig_pt" in t:
+                    del t["_orig_pt"]
+                is_new = t.pop("_is_new", False)
+                if not en:
+                    continue
+                if is_new and en.lower() not in existing_keys:
+                    terms_list.append(t)
+                    existing_keys.add(en.lower())
+                    added += 1
+                elif pt:
+                    updated += 1
+            gdata["terms"] = terms_list
+            try:
+                shutil.copy2(g_path, g_path + ".bak")
+            except Exception:
+                pass
+            with open(g_path, "w", encoding="utf-8") as f:
+                json.dump(gdata, f, indent=2, ensure_ascii=False)
+            if hasattr(self, "_load_glossary_into_table"):
+                try:
+                    if hasattr(self, "glossary_path_edit"):
+                        self.glossary_path_edit.setText(g_path)
+                    self._load_glossary_into_table()
+                except Exception:
+                    pass
+            self.gloss_audit_label.setText(f"Candidates merged: +{added} new, {updated} updated -> {g_path}")
+            self._append_log(f"[CANDIDATES] +{added} new, {updated} updated")
+            QMessageBox.information(self, "Done", f"+{added} new\n{updated} updated\n\n{g_path}")
+        worker.finished_signal.connect(on_finished)
+        worker.start()
+
+    def _wizard_ai_audit_glossary(self):
+        g_path = self._wizard_glossary_path()
+        if not g_path or not os.path.exists(g_path):
+            QMessageBox.warning(self, "No glossary", "Set glossary path first.")
+            return
+        cfg = self._get_api_config()
+        if not cfg.get("api_key"):
+            QMessageBox.warning(self, "No API key", "Configure API first.")
+            return
+        gdata = json.load(open(g_path, encoding="utf-8"))
+        terms = gdata.get("terms") or []
+        if not isinstance(terms, list):
+            QMessageBox.warning(self, "Bad glossary", "Expected terms: []")
+            return
+        risk = []
+        for t in terms:
+            if not isinstance(t, dict):
+                continue
+            en = (t.get("term_english") or "").strip()
+            pt = (t.get("term_translated") or "").strip()
+            if not en:
+                continue
+            words = en.split()
+            short = len(words) == 1 and len(en) <= 12
+            missing = (not pt) or (pt.lower() == en.lower())
+            already_soft = t.get("inline") is False
+            if already_soft and not missing:
+                continue
+            if short or missing:
+                risk.append(t)
+        risk = risk[:120]
+        if not risk:
+            QMessageBox.information(self, "AI audit", "No high-risk terms found.")
+            return
+        n_calls = (len(risk) + 24) // 25
+        reply = QMessageBox.question(
+            self, "AI glossary audit (PAID)",
+            f"Review {len(risk)} terms (~{n_calls} calls) for polysemes/missing PT?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._append_log(f"=== AI audit: {len(risk)} terms ===")
+        self.cancel_btn.setEnabled(True)
+        self.progress.setValue(0)
+        from PySide6.QtCore import QThread, Signal
+
+        class GlossaryAuditWorker(QThread):
+            progress = Signal(int, int, str)
+            log = Signal(str)
+            finished_signal = Signal(bool, object)
+            def __init__(self, terms, model, api_key, base_url):
+                super().__init__()
+                self.terms = terms
+                self.model = model
+                self.api_key = api_key
+                self.base_url = base_url
+            def run(self):
+                try:
+                    from tradutor import TranslationEngine
+                    engine = TranslationEngine(self.model, 0.1, api_key=self.api_key, base_url=self.base_url)
+                    if not engine._ensure_client():
+                        self.finished_signal.emit(False, "No LLM client")
+                        return
+                    suggestions = []
+                    bs = 25
+                    batches = [self.terms[i:i+bs] for i in range(0, len(self.terms), bs)]
+                    for bi, batch in enumerate(batches):
+                        if self.isInterruptionRequested():
+                            break
+                        items = [{"en": t.get("term_english", ""), "pt": t.get("term_translated", ""),
+                                  "preserve": bool(t.get("preserve")), "inline": t.get("inline", True)} for t in batch]
+                        user = (
+                            "Audit WH40K glossary EN->PT-BR. Return JSON.\n"
+                            "Common polysemes (Command, Charge, Shield) -> inline:false.\n"
+                            "Unique 40k terms (Psyker, Bolter) keep inline:true.\n"
+                            "Missing/bad PT -> suggest better.\n"
+                            "Respond ONLY: {\"items\":[{\"en\":\"\",\"inline\":true,"
+                            "\"pt\":\"\",\"preserve\":true,\"note\":\"\"}]}\n"
+                            f"Terms:{json.dumps(items, ensure_ascii=False)}"
+                        )
+                        try:
+                            resp = engine._client.chat.completions.create(
+                                model=self.model,
+                                messages=[{"role": "system", "content": "Return only valid JSON."},
+                                          {"role": "user", "content": user}],
+                                temperature=0.1, max_tokens=4000,
+                            )
+                            raw = (resp.choices[0].message.content or "").strip()
+                            a, b = raw.find("{"), raw.rfind("}")
+                            if a >= 0 and b > a:
+                                raw = raw[a:b+1]
+                            data = json.loads(raw)
+                            suggestions.extend(data.get("items") or [])
+                            self.log.emit(f"[AI-AUDIT] batch {bi+1}/{len(batches)} -> {len(data.get('items') or [])} items")
+                        except Exception as e:
+                            self.log.emit(f"[AI-AUDIT] batch {bi+1} failed: {e}")
+                        self.progress.emit(bi + 1, len(batches), f"batch {bi+1}/{len(batches)}")
+                    self.finished_signal.emit(True, suggestions)
+                except Exception as e:
+                    self.finished_signal.emit(False, str(e))
+
+        worker = GlossaryAuditWorker(risk, cfg["model"], cfg["api_key"], cfg["base_url"])
+        self._audit_worker = worker
+        worker.log.connect(self._append_log)
+        worker.progress.connect(lambda c, t, m: self.progress.setValue(int(c / max(t, 1) * 100)))
+        def on_done(ok, result):
+            self.cancel_btn.setEnabled(False)
+            if not ok:
+                QMessageBox.warning(self, "Failed", str(result))
+                return
+            suggestions = result or []
+            if not suggestions:
+                QMessageBox.information(self, "AI audit", "No suggestions.")
+                return
+            report_path = "data/glossary_ai_audit.json"
+            os.makedirs("data", exist_ok=True)
+            with open(report_path, "w", encoding="utf-8") as f:
+                json.dump({"suggestions": suggestions}, f, ensure_ascii=False, indent=2)
+            dlg = QDialog(self)
+            dlg.setWindowTitle(f"AI audit ({len(suggestions)} suggestions)")
+            dlg.resize(800, 500)
+            lay = QVBoxLayout(dlg)
+            table = QTableWidget(len(suggestions), 5)
+            table.setHorizontalHeaderLabels(["Apply", "EN", "inline", "PT", "Note"])
+            table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+            for i, s in enumerate(suggestions):
+                cb = QTableWidgetItem()
+                cb.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                want = (s.get("inline") is False) or bool((s.get("pt") or "").strip())
+                cb.setCheckState(Qt.Checked if want else Qt.Unchecked)
+                table.setItem(i, 0, cb)
+                table.setItem(i, 1, QTableWidgetItem(str(s.get("en") or "")))
+                table.setItem(i, 2, QTableWidgetItem(str(s.get("inline"))))
+                table.setItem(i, 3, QTableWidgetItem(str(s.get("pt") or "")))
+                table.setItem(i, 4, QTableWidgetItem(str(s.get("note") or "")))
+            lay.addWidget(table)
+            def apply():
+                by_en = {(t.get("term_english") or "").strip().lower(): t for t in terms if isinstance(t, dict)}
+                n_i = n_p = n_pr = 0
+                for i, s in enumerate(suggestions):
+                    it = table.item(i, 0)
+                    if not it or it.checkState() != Qt.Checked:
+                        continue
+                    en = (s.get("en") or "").strip().lower()
+                    t = by_en.get(en)
+                    if not t:
+                        continue
+                    if "inline" in s:
+                        t["inline"] = bool(s["inline"])
+                        if s["inline"] is False:
+                            n_i += 1
+                    pt = (s.get("pt") or "").strip()
+                    if pt:
+                        t["term_translated"] = pt
+                        n_p += 1
+                    if "preserve" in s:
+                        t["preserve"] = bool(s["preserve"])
+                        n_pr += 1
+                try:
+                    shutil.copy2(g_path, g_path + ".bak")
+                except Exception:
+                    pass
+                gdata["terms"] = terms
+                with open(g_path, "w", encoding="utf-8") as f:
+                    json.dump(gdata, f, indent=2, ensure_ascii=False)
+                self.gloss_audit_label.setText(f"AI audit applied: inline:false x{n_i}, PT x{n_p}")
+                self._append_log(f"[AI-AUDIT] inline_off={n_i} pt={n_p} preserve={n_pr}")
+                if hasattr(self, "_load_glossary_into_table"):
+                    try:
+                        self._load_glossary_into_table()
+                    except Exception:
+                        pass
+                QMessageBox.information(dlg, "Applied", f"inline:false {n_i}\nPT {n_p}\npreserve {n_pr}")
+                dlg.accept()
+            apply_btn = QPushButton("Apply checked")
+            apply_btn.setObjectName("primary")
+            apply_btn.clicked.connect(apply)
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dlg.reject)
+            rowb = QHBoxLayout()
+            rowb.addWidget(apply_btn)
+            rowb.addWidget(close_btn)
+            lay.addLayout(rowb)
+            dlg.exec()
+        worker.finished_signal.connect(on_done)
+        worker.start()
+
+    def _wizard_build_delta(self):
+        old = self.tr_old_en.text().strip()
+        new = self.tr_new_en.text().strip()
+        out = self.tr_delta_out.text().strip() or "data/delta_en.json"
+        if not old or not os.path.exists(old) or not new or not os.path.exists(new):
+            QMessageBox.warning(self, "Missing", "Set both OLD and NEW English.")
+            return
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        cmd = [sys.executable, "diff_tool.py", "update", old, new, "--out", out]
+        self._append_log(f"Building delta: {' '.join(cmd)}")
+        self._start_with_worker(cmd, "Build EN delta (free)", os.environ.copy())
+        self.tr_delta_out.setText(out)
+        self.tr_input.setText(out)
+        self._wizard_state["work_input"] = out
+        self._wizard_state["mode"] = "update"
+        self.mode_hint.setText(f"Delta queued -> {out}. Pre-Scan it when done.")
+
+    def _wizard_set_prescan_plan(self, summary: dict, loaded: bool = True):
+        self._wizard_state["prescan_loaded"] = loaded
+        self._wizard_state["prescan_summary"] = summary or {}
+        if not loaded:
+            self.prescan_plan_badge.setText("Plan not loaded — run Pre-Scan before translating.")
+            self.prescan_plan_badge.setStyleSheet(
+                "background:#2a1a1a; border:1px solid #6a3030; border-radius:6px; padding:8px; color:#e8b0b0;"
+            )
+            return
+        s = summary
+        self.prescan_plan_badge.setText(
+            f"PLAN LOADED — {s.get('total', 0):,} total | "
+            f"exact {s.get('preserved', 0):,} | skip {s.get('skip', 0):,} | EULA {s.get('eula', 0):,} | "
+            f"short {s.get('short', 0):,} | med {s.get('medium', 0):,} | long {s.get('long', 0):,}\n"
+            f"Smart batches at run time. Cache: prescan_cache.json"
+        )
+        self.prescan_plan_badge.setStyleSheet(
+            "background:#1a2a1a; border:1px solid #3a6a40; border-radius:6px; padding:8px; color:#b8e0b8;"
+        )
+        self.run_hint.setText("Plan loaded. Press START PRESERVE TRANSLATION.")
+
+    def _wizard_reload_prescan_cache(self):
+        cache_path = "prescan_cache.json"
+        if not os.path.exists(cache_path):
+            self._wizard_set_prescan_plan({}, loaded=False)
+            return
+        try:
+            cache = json.load(open(cache_path, encoding="utf-8"))
+            buckets = cache.get("buckets") or {}
+            summary = {
+                "source": cache.get("source_path", ""),
+                "total": cache.get("total", 0),
+                "preserved": len(buckets.get("PRESERVED") or []),
+                "skip": len(buckets.get("SKIP") or []),
+                "eula": len(buckets.get("EULA") or []),
+                "short": len(buckets.get("SHORT") or []),
+                "medium": len(buckets.get("MEDIUM") or []),
+                "long": len(buckets.get("LONG") or []),
+                "pending": len(buckets.get("PENDING") or []),
+            }
+            wi = self._wizard_effective_input()
+            if wi and os.path.exists(wi):
+                import hashlib
+                h = hashlib.md5(open(wi, "rb").read()).hexdigest()
+                if cache.get("source_hash") and cache.get("source_hash") != h:
+                    self.prescan_plan_badge.setText("Cache is STALE for current work input — run Pre-Scan again.")
+                    self.prescan_plan_badge.setStyleSheet(
+                        "background:#2a2a1a; border:1px solid #6a6a30; border-radius:6px; padding:8px; color:#e8e0b0;"
+                    )
+                    self._wizard_state["prescan_loaded"] = False
+                    return
+            self._wizard_set_prescan_plan(summary, loaded=True)
+            self._append_log(f"[PLAN] Loaded cache: exact={summary['preserved']} skip={summary['skip']}")
+        except Exception as e:
+            self._append_log(f"[PLAN] reload failed: {e}")
+            self._wizard_set_prescan_plan({}, loaded=False)
+
+    def _wizard_start_preserve(self):
+        wi = self._wizard_effective_input()
+        if wi:
+            self.tr_input.setText(wi)
+        if not self._wizard_state.get("prescan_loaded") and not self.dry_run_cb.isChecked():
+            reply = QMessageBox.question(
+                self, "No Pre-Scan plan",
+                "Pre-Scan plan not loaded. Run Step 4 first?\n\nContinue without plan?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+        self.preserve_toggle.setChecked(True)
+        self._start_translation(optimized=True)
+        self.result_label.setText("Preserve run started. When done, press FULLIZE.")
+
+    def _wizard_start_full_only(self):
+        wi = self._wizard_effective_input()
+        if wi:
+            self.tr_input.setText(wi)
+        self.preserve_toggle.setChecked(False)
+        if self.tr_full_output.text().strip():
+            self.tr_output.setText(self.tr_full_output.text().strip())
+        self._start_translation(optimized=True)
+        self.result_label.setText("Full-only translation started (preserve OFF).")
+
+    def _wizard_dry_run(self):
+        self.dry_run_cb.setChecked(True)
+        wi = self._wizard_effective_input()
+        if wi:
+            self.tr_input.setText(wi)
+        self._start_translation(optimized=True)
+
+    def _on_model_changed_profile(self, *_args):
+        self._refresh_profile_label()
+
+    def _refresh_profile_label(self):
+        if not hasattr(self, "profile_label"):
+            return
+        model = self.model_edit.currentText().strip() if hasattr(self, "model_edit") else ""
+        try:
+            from model_profiles import profile_summary
+            self.profile_label.setText(profile_summary(model or "deepseek-v4-flash"))
+        except Exception:
+            self.profile_label.setText("Profiles from model_profiles.py at run time.")
+
 
     def _file_row(self, parent_layout, label: str, default_name: str, picker_slot):
         row = QHBoxLayout()
@@ -1406,19 +2085,8 @@ class W40kTranslatorGUI(QMainWindow):
             eula_btn.clicked.connect(auto_blacklist_eula)
             btn_row.addWidget(eula_btn)
         
-        # "Start Optimized Translation" button
-        start_btn = QPushButton("🚀 Start Optimized Translation")
-        start_btn.setObjectName("primary")
-        start_btn.setToolTip(
-            "Launches translation with:\n"
-            "• Pre-Scan cache (skips re-classification)\n"
-            "• Smart batching (50/30/12/5 per length tier)\n"
-            "• EULA blacklist auto-applied\n"
-            "• Your current model/temperature/workers settings"
-        )
-        def start_optimized():
-            dlg.accept()
-            # Ensure EULA blacklist is applied if available
+        # Load plan into main UI — single Start button lives on Translate tab
+        def load_plan_and_close():
             if eula_count > 0 and not eula_keys_saved[0]:
                 eula_keys = [item[0] for item in buckets["EULA"]]
                 auto_path = "data/blacklists/blacklist_eula.json"
@@ -1426,11 +2094,43 @@ class W40kTranslatorGUI(QMainWindow):
                 with open(auto_path, "w", encoding="utf-8") as f:
                     json.dump(eula_keys, f, indent=2)
                 self.tr_blacklist.setText(auto_path)
-                self._append_log(f"EULA blacklist auto-saved: {len(eula_keys)} UUIDs → {auto_path}")
-            self._start_translation(optimized=True)
-        start_btn.clicked.connect(start_optimized)
-        btn_row.addWidget(start_btn)
-        
+            summary = {
+                "source": self.tr_input.text().strip(),
+                "total": total,
+                "preserved": preserved_count,
+                "skip": skip_count,
+                "eula": eula_count,
+                "short": len(buckets.get("SHORT") or []),
+                "medium": len(buckets.get("MEDIUM") or []),
+                "long": len(buckets.get("LONG") or []),
+                "pending": len(buckets.get("PENDING") or []),
+            }
+            if hasattr(self, "_wizard_set_prescan_plan"):
+                self._wizard_set_prescan_plan(summary, loaded=True)
+            self._append_log(f"[PLAN LOADED] exact={preserved_count} skip={skip_count} eula={eula_count}")
+            dlg.accept()
+
+        use_btn = QPushButton("Use this plan")
+        use_btn.setObjectName("primary")
+        use_btn.setToolTip("Loads plan into the Translate tab. Then press START PRESERVE.")
+        use_btn.clicked.connect(load_plan_and_close)
+        btn_row.addWidget(use_btn)
+
+        # Auto-load plan right now (before user clicks close)
+        summary = {
+            "source": self.tr_input.text().strip(),
+            "total": total,
+            "preserved": preserved_count,
+            "skip": skip_count,
+            "eula": eula_count,
+            "short": len(buckets.get("SHORT") or []),
+            "medium": len(buckets.get("MEDIUM") or []),
+            "long": len(buckets.get("LONG") or []),
+            "pending": len(buckets.get("PENDING") or []),
+        }
+        if hasattr(self, "_wizard_set_prescan_plan"):
+            self._wizard_set_prescan_plan(summary, loaded=True)
+
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(dlg.accept)
         btn_row.addStretch()
