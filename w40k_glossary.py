@@ -9,7 +9,7 @@ Toda a lógica do diálogo ⑤ Glossário vive aqui, testável com stdlib puro:
   - sugestão PT via LLM em UMA chamada em lote (prompt builder + parser
     robusto a desvios de formato/numeração, no padrão do engine)
   - semente wiki: offline (wiki_sync.get_wiki_data) e ao vivo (MediaWiki
-    API, lógica portada da GUI antiga tradutor_desktop.py ~2722-2794)
+    API, lógica portada da GUI legada, removida na v2.0)
 
 O glossário editado é SEMPRE o do projeto (§9.7) — nunca o do repo.
 """
@@ -571,7 +571,7 @@ _WIKI_CAT_MAP = {
 def wiki_fetch_live(term: str, opener: Optional[Callable] = None
                     ) -> Dict[str, Any]:
     """Busca UM termo na wiki ao vivo (MediaWiki API) — lógica portada da
-    GUI antiga (tradutor_desktop._live_wiki_scrape_dialog ~2722-2794).
+    GUI legada (diálogo de scrape da wiki ao vivo, removido na v2.0).
     Retorna uma entrada pronta para merge; levanta ValueError se não achar."""
     import urllib.parse
     import urllib.request

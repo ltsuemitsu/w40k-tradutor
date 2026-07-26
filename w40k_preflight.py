@@ -9,7 +9,7 @@ sem PySide6 (testes rodam com `python -m unittest discover -s tests`):
   - estimativa de tokens/lotes/duração/custo (heurísticas declaradas)
   - parse de linhas de progresso do engine (tqdm + logging)
   - credenciais de API: variáveis de ambiente + cofre do Windows (keyring)
-    com o mesmo padrão do tradutor_desktop.py — nunca persiste plaintext
+    no padrão da GUI legada — nunca persiste plaintext
   - env de subprocess no padrão comprovado da GUI antiga
   - summarize_output: contagens pós-run a partir do arquivo de saída
 """
@@ -480,7 +480,7 @@ def summarize_output(output_path: Path) -> Dict[str, int]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Credenciais de API (padrão do tradutor_desktop.py, sem fallback plaintext)
+# Credenciais de API (padrão da GUI legada, sem fallback plaintext)
 # ─────────────────────────────────────────────────────────────────────────────
 
 KEYRING_SERVICE = "W40kTradutor"
@@ -590,7 +590,7 @@ def resolve_api_key(provider: str, typed: str = "") -> Tuple[str, str]:
 def subprocess_env(model: str, key: str,
                    base_url: str = "") -> Dict[str, str]:
     """Env para o subprocess tradutor.py — padrão comprovado da GUI antiga
-    (tradutor_desktop.py ~3301-3321): injeta a chave em todas as variáveis
+    (GUI legada, removida na v2.0): injeta a chave em todas as variáveis
     conhecidas e a base URL do modelo em DEEPSEEK_BASE_URL."""
     env = os.environ.copy()
     if key:

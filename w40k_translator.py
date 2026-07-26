@@ -1,6 +1,6 @@
 """W40K Translator — nova GUI (Fase 1 do GUI_REDESIGN.md).
 
-App PySide6 separado do `tradutor_desktop.py` legado. UI em PT-BR, tema
+App PySide6 (a GUI legada foi removida na v2.0). UI em PT-BR, tema
 grimdark (fundo #0a0a12, dourado #c9a84c), centrado em PROJETOS:
 
   - Tela de boas-vindas: Novo Projeto / Adotar Tradução Existente / Abrir.

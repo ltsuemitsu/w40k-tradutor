@@ -261,7 +261,7 @@ if preserve_toggle_active and glossary.should_preserve(text):
 
 ## 6. Implementation Notes for the Desktop App
 
-- The GUI will be a separate entry point (`python -m w40k_translator.gui` or `tradutor_desktop.py`).
+- The GUI will be a separate entry point (the legacy desktop entry point was removed in v2.0; the app now launches via `w40k_translator.py`).
 - Core logic lives in a clean `core/` package (or the existing modules are made import-friendly).
 - First version can drive the existing `tradutor.py`, `diff_tool.py`, etc. via function calls + threading (preferred) or subprocess + stdout parsing (quick start).
 - Glossary editing will directly use the data functions from `glossary_manager.py` + the new model.

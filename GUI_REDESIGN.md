@@ -274,7 +274,7 @@ in project.json so the migration path exists.
 
 ## 6. What we keep from the current GUI
 
-- PySide6 desktop app (familiar, no new runtime; `launch_gui.bat/ps1` flow).
+- PySide6 desktop app (familiar, no new runtime; launcher script flow).
 - Keyring API-key storage.
 - Live-wiki glossary fetch.
 - Grimdark theme (optional toggle; readability first).
