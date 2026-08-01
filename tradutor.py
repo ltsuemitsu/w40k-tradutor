@@ -557,25 +557,55 @@ def localize_gender_tags(text: str) -> str:
 
 
 def scrub_leaked_term_placeholders(text: str) -> str:
-    """Remove any leftover term locks that escaped restore."""
+    """Remove leftover term/tag locks that escaped restore (or LLM hallucinations).
+
+    Also unwraps paired junk like §TAG0§word§TAG1§ → word.
+    """
     if not text:
         return text
-    return re.sub(r"\[\[W40KT\d+\]\]|§TERM\d+§|\$TERM\d+\$", "", text)
+    text = re.sub(r"§TAG(\d+)\$", lambda m: "§TAG%s§" % m.group(1), text, flags=re.I)
+    text = re.sub(r"§TERM(\d+)\$", lambda m: "§TERM%s§" % m.group(1), text, flags=re.I)
+    text = re.sub(
+        r"(?:\[\[W40KG\d+\]\]|§TAG\d+§|\$TAG\d+\$)"
+        r"([^\[\]§$]{1,80}?)"
+        r"(?:\[\[W40KG\d+\]\]|§TAG\d+§|\$TAG\d+\$)",
+        lambda m: m.group(1),
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r"\[\[W40KT\d+\]\]|\[\[W40KG\d+\]\]"
+        r"|§TERM\d+§|\$TERM\d+\$"
+        r"|§TAG\d+§|\$TAG\d+\$"
+        r"|§(?:TAG|TERM)\d+(?:§|\$|°|®|%)*"
+        r"|\$(?:TAG|TERM)\d+(?:§|\$|°|®|%)*",
+        "",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text
 
 
 
 def fullize_text(text: str, en_to_pt: Dict[str, str]) -> str:
-    """Free replace: glossary EN terms → term_translated (longest-first, word boundary)."""
+    """Free replace: glossary EN terms → term_translated (longest-first).
+
+    Uses (?<!\\w)...(?!\\w) instead of \\b so terms ending in ')' still match,
+    e.g. ``Base Skill: Lore (Imperium)``.
+    """
     if not text or not en_to_pt:
         return text
     # Longest EN first
     items = sorted(en_to_pt.items(), key=lambda kv: len(kv[0]), reverse=True)
     # Skip no-ops (EN == PT) — nothing to do
-    items = [(en, pt) for en, pt in items if en != pt]
+    items = [(en, pt) for en, pt in items if en and pt and en != pt]
     if not items:
         return text
+    # Single alternation, longest-first order matters for leftmost-longest via sort
+    # (re picks first alternative that matches at a position — longest-first list helps)
     pattern = re.compile(
-        r"\b(?:" + "|".join(re.escape(en) for en, _ in items) + r")\b",
+        r"(?<!\w)(?:" + "|".join(re.escape(en) for en, _ in items) + r")(?!\w)",
         re.IGNORECASE,
     )
     lower_map = {en.lower(): pt for en, pt in items}
