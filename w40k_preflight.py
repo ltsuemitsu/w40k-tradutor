@@ -177,7 +177,7 @@ def _all_terms_pattern(glossary_path: Path, batch: int = 400):
 _CANDIDATE_RE = re.compile(
     r"\b[A-Z][a-zA-Z0-9'&\-]*(?:\s+[A-Z][a-zA-Z0-9'&\-]*){0,3}\b"
 )
-# Palavras capitalizadas por início de frase — ruído, não terminologia.
+# Palavras capitalizadas por início de frase / discurso — ruído, não terminologia.
 _CANDIDATE_STOPWORDS = {
     "the", "a", "an", "you", "your", "yours", "he", "she", "it", "its",
     "his", "her", "hers", "we", "our", "they", "their", "them", "this",
@@ -188,7 +188,134 @@ _CANDIDATE_STOPWORDS = {
     "can", "could", "shall", "should", "may", "might", "must", "i",
     "every", "each", "all", "some", "any", "many", "more", "most",
     "another", "other", "such", "what", "which", "who", "there", "here",
+    # discourse / sentence openers that pass the Title Case regex a lot
+    "then", "than", "thus", "hence", "however", "therefore", "whenever",
+    "wherever", "whatever", "whoever", "whichever", "although", "though",
+    "because", "since", "until", "unless", "while", "whereas", "meanwhile",
+    "perhaps", "maybe", "please", "thank", "thanks", "well", "just", "even",
+    "only", "also", "still", "already", "always", "never", "often", "once",
+    "again", "further", "furthermore", "moreover", "instead", "rather",
+    "enough", "quite", "very", "really", "actually", "basically",
+    "look", "looks", "take", "takes", "tell", "tells", "come", "comes",
+    "leave", "leaves", "make", "makes", "give", "gives", "get", "gets",
+    "see", "sees", "know", "knows", "think", "thinks", "want", "wants",
+    "need", "needs", "use", "uses", "try", "tries", "keep", "keeps",
+    "let", "lets", "put", "puts", "set", "sets", "run", "runs",
+    "where", "when", "why", "how", "who", "whom", "whose",
+    "now", "today", "tomorrow", "yes", "no", "ok", "okay",
 }
+# Single-word Title Case that is almost never a glossary headword by itself
+# (UI verbs, combat fluff, grammar). Multi-word phrases still pass.
+_CANDIDATE_SINGLE_NOISE = {
+    "bonus", "turn", "round", "ability", "abilities", "attack", "attacks",
+    "damage", "death", "test", "tests", "influence", "master", "lord", "lady",
+    "house", "human", "humanity", "please", "thank", "thanks", "well",
+    "just", "even", "only", "then", "however", "whenever", "perhaps",
+    "enough", "until", "once", "come", "leave", "take", "look", "tell",
+    "where", "when", "domin",  # fragment of "dominated"
+    "encyclopedia", "entry", "entries", "value", "values", "amount",
+    "percent", "percentage", "character", "characters", "unit", "units",
+    "enemy", "enemies", "ally", "allies", "target", "targets", "effect",
+    "effects", "skill", "skills", "level", "levels", "type", "types",
+    "area", "areas", "cell", "cells", "item", "items", "quest", "quests",
+    "mission", "missions", "option", "options", "button", "buttons",
+    "screen", "window", "menu", "tutorial", "continue", "cancel", "confirm",
+    "accept", "decline", "close", "open", "back", "next", "previous",
+    "start", "end", "begin", "finish", "complete", "completed", "failed",
+    "success", "failure", "error", "warning", "note", "notes", "tip", "tips",
+    "click", "hover", "select", "selected", "press", "hold", "drag",
+    "right", "left", "up", "down", "north", "south", "east", "west",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "first", "second", "third", "last", "new", "old", "good", "bad",
+    "great", "small", "large", "high", "low", "full", "empty", "true", "false",
+    "something", "nothing", "everything", "anything", "someone", "anyone",
+    "order", "orders", "flock", "wait", "waiting", "show", "shows", "shown",
+    "child", "children", "glory", "cult", "cults", "find", "finds", "found",
+    "stop", "stops", "sister", "sisters", "brother", "brothers", "father",
+    "mother", "friend", "friends", "people", "person", "thing", "things",
+    "time", "times", "way", "ways", "part", "parts", "side", "sides",
+    "place", "places", "name", "names", "word", "words", "voice", "voices",
+    "power", "powers", "force", "forces", "light", "dark", "fire", "blood",
+    "body", "mind", "soul", "life", "world", "worlds", "ship", "ships",
+}
+
+# Contractions / clitics: It's, I'll, Don't, You're, That's, Let's, I've…
+_CONTRACTION_RE = re.compile(
+    r"(?i)^(i|you|he|she|it|we|they|that|there|here|what|who|let|do|does|"
+    r"did|is|are|was|were|have|has|had|will|would|can|could|should|shall|"
+    r"ai|wo|ca|wouldn|shouldn|couldn|mustn|needn|mightn|oughtn|don|doesn|"
+    r"didn|isn|aren|wasn|weren|haven|hasn|hadn|won|can)"
+    r"('ll|'re|'ve|'d|'m|'s|n't)$"
+)
+
+# Internal Encyclopedia / UI camel ids leaked from {g|Encyclopedia:Foo}
+_TECH_ID_RE = re.compile(
+    r"(?i)(glossary|encyclopedia|warhammer|hitpoints|actionpoints|"
+    r"movementpoints|hitsequence|damagetype|uip|tooltip)$"
+)
+_CAMEL_TECH_RE = re.compile(r"^[A-Z][a-z]+(?:[A-Z][a-z]+)+$")  # DamageGlossary
+
+
+def _strip_markup_for_candidates(text: str) -> str:
+    """Drop game/HTML markup so tag *keys* are not harvested as terms."""
+    if not text:
+        return ""
+    # Keep human content inside paired g/d tags; drop the key path
+    text = re.sub(r"\{g\|[^}]+\}", " ", text, flags=re.I)
+    text = re.sub(r"\{/g\}", " ", text, flags=re.I)
+    text = re.sub(r"\{d\|[^}]+\}", " ", text, flags=re.I)
+    text = re.sub(r"\{/d\}", " ", text, flags=re.I)
+    text = re.sub(r"\{[^}]+\}", " ", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _normalize_candidate_phrase(words: List[str]) -> Optional[str]:
+    """Strip leading stopwords / trailing possessives; None if junk."""
+    while words and words[0].lower().strip("'") in _CANDIDATE_STOPWORDS:
+        words = words[1:]
+    if not words:
+        return None
+    # Drop trailing 's possession for counting: "Rogue Trader's" → "Rogue Trader"
+    last = words[-1]
+    if last.endswith("'s") or last.endswith("'S"):
+        base = last[:-2]
+        if base:
+            words = words[:-1] + [base]
+    # Reject contractions (It's, I'll, Don't…)
+    if any(_CONTRACTION_RE.match(w.replace("\u2019", "'")) for w in words):
+        return None
+    # Any token still a bare stopword → reject whole phrase
+    cleaned = []
+    for w in words:
+        wl = w.lower().strip("'")
+        if wl in _CANDIDATE_STOPWORDS:
+            return None
+        cleaned.append(w)
+    if not cleaned:
+        return None
+    # Tech / encyclopedia internal ids
+    for w in cleaned:
+        if _TECH_ID_RE.search(w) or ( _CAMEL_TECH_RE.match(w) and " " not in w ):
+            return None
+        if w.lower() in {"encyclopedia", "testentry", "test"}:
+            return None
+    # Single-word noise (UI verbs, combat fluff)
+    if len(cleaned) == 1 and cleaned[0].lower() in _CANDIDATE_SINGLE_NOISE:
+        return None
+    # Single very short tokens (Iam, Ok, …)
+    if len(cleaned) == 1 and len(cleaned[0]) < 4:
+        return None
+    # All-caps noise of length 1-2 (UI labels OK if 3+ like MP kept? skip 1-2)
+    if len(cleaned) == 1 and cleaned[0].isupper() and len(cleaned[0]) <= 2:
+        return None
+    phrase = " ".join(cleaned)
+    if len(phrase) < 4:
+        return None
+    if all(w.lower() in _CANDIDATE_STOPWORDS for w in cleaned):
+        return None
+    return phrase
 
 
 def scan_candidate_terms(texts: List[str],
@@ -198,28 +325,30 @@ def scan_candidate_terms(texts: List[str],
     """Frases EN capitalizadas (1–4 palavras) repetidas que NÃO estão no
     glossário. Retorna [(termo, ocorrências)] ordenado por frequência.
 
-    Stopwords iniciais ("The", "Every", ...) são removidas da frase para
-    que "The Star Port" e "every Star Port" contem como o mesmo termo.
+    Filtra contrações (It's/I'll), discurso (Then/However), chaves internas
+    de Encyclopedia, e markup do jogo antes de escanear.
     """
     counts: Dict[str, int] = {}
     canonical: Dict[str, str] = {}
     for text in texts:
-        for match in _CANDIDATE_RE.finditer(text):
+        plain = _strip_markup_for_candidates(text)
+        if not plain:
+            continue
+        for match in _CANDIDATE_RE.finditer(plain):
             words = match.group(0).split()
-            while words and words[0].lower() in _CANDIDATE_STOPWORDS:
-                words = words[1:]
-            if not words:
-                continue
-            phrase = " ".join(words)
-            if len(phrase) < 4:
+            phrase = _normalize_candidate_phrase(words)
+            if not phrase:
                 continue
             key = phrase.lower()
             if key in glossary_keys:
                 continue
-            if all(w in _CANDIDATE_STOPWORDS for w in key.split()):
-                continue
             counts[key] = counts.get(key, 0) + 1
-            canonical.setdefault(key, phrase)
+            # Prefer form without leading article leftovers already stripped
+            prev = canonical.get(key)
+            if prev is None or (phrase[0].isupper() and not prev[0].isupper()):
+                canonical[key] = phrase
+            elif prev is None:
+                canonical[key] = phrase
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     return [(canonical[k], c) for k, c in ranked if c >= min_count][:top_n]
 
@@ -479,6 +608,64 @@ def summarize_output(output_path: Path) -> Dict[str, int]:
             "failed": failed}
 
 
+def summarize_resume_state(input_path: Path,
+                           output_path: Optional[Path]) -> Dict[str, Any]:
+    """Quanto falta para a trilha ficar completa (resume / UI Continuar).
+
+    Compara EN de entrada com o master de saída (se existir):
+      - done: UUID EN não vazio com Text PT e sem _failed
+      - failed: flag _failed no master
+      - missing: UUID EN não vazio ausente do master ou Text PT vazio
+      - pct: 0–100 sobre strings EN não vazias
+
+    Usado para:
+      - mostrar \"Continuar de onde parou\" ao reabrir o wizard
+      - NÃO marcar a trilha como done se ainda houver pending/failed
+    """
+    en = wp.load_localization(input_path)
+    en_s = en.get("strings") or {}
+    pt_s: Dict[str, Any] = {}
+    if output_path is not None and Path(output_path).is_file():
+        try:
+            pt_s = (wp.load_localization(output_path).get("strings") or {})
+        except wp.LocalizationFormatError:
+            pt_s = {}
+
+    nonempty = done = failed = missing = 0
+    for key, value in en_s.items():
+        if not isinstance(value, dict):
+            continue
+        en_text = (value.get("Text") or "").strip()
+        if not en_text:
+            continue
+        nonempty += 1
+        entry = pt_s.get(key)
+        if not isinstance(entry, dict):
+            missing += 1
+            continue
+        if entry.get("_failed"):
+            failed += 1
+            continue
+        pt_text = (entry.get("Text") or "").strip()
+        if not pt_text:
+            missing += 1
+            continue
+        done += 1
+
+    pending = failed + missing
+    pct = round(100.0 * done / nonempty, 1) if nonempty else 100.0
+    return {
+        "nonempty": nonempty,
+        "done": done,
+        "failed": failed,
+        "missing": missing,
+        "pending": pending,
+        "pct": pct,
+        "complete": pending == 0 and nonempty > 0,
+        "has_output": bool(pt_s),
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Credenciais de API (padrão da GUI legada, sem fallback plaintext)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -585,6 +772,46 @@ def resolve_api_key(provider: str, typed: str = "") -> Tuple[str, str]:
     if saved:
         return saved, "cofre do Windows"
     return "", ""
+
+
+def resolve_any_api_key(preferred_provider: str = "",
+                        typed: str = "") -> Tuple[str, str, str]:
+    """Resolve chave para um provedor preferido, com fallback amplo.
+
+    Ordem:
+      1) texto digitado (origem = preferred ou \"\")
+      2) chave do preferred_provider (env genérico + cofre desse provedor)
+      3) qualquer variável de ambiente conhecida
+      4) cofre de cada provedor conhecido (DeepSeek, Zhipu, Kimi, Custom…)
+
+    Retorna (chave, origem_pt, provider_que_bateu).
+    Usado por fluxos fora da jornada de tradução (ex.: Sugerir via LLM no
+    glossário), onde não há campo de chave na tela e o modelo padrão pode
+    ser DeepSeek enquanto a única chave salva é Zhipu/ZAI.
+    """
+    if typed.strip():
+        return typed.strip(), "digitada agora", (preferred_provider or "")
+
+    if preferred_provider:
+        key, src = resolve_api_key(preferred_provider, "")
+        if key:
+            # env_api_key is global — attribute to preferred when it hits
+            return key, src, preferred_provider
+
+    env = env_api_key()
+    if env:
+        return env, "variável de ambiente", (preferred_provider or "")
+
+    # Walk known keyring slots (and any provider name we know)
+    tried = set()
+    for prov in list(PROVIDER_KEY_NAMES.keys()):
+        if prov in tried:
+            continue
+        tried.add(prov)
+        saved = key_store_get(prov)
+        if saved:
+            return saved, f"cofre do Windows ({prov})", prov
+    return "", "", ""
 
 
 def subprocess_env(model: str, key: str,

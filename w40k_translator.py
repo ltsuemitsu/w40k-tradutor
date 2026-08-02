@@ -1437,15 +1437,38 @@ class GlossaryDialog(QDialog):
 
         model = st.default_model()
         provider = pf.provider_for_model(model)
-        key, _source = pf.resolve_api_key(provider, "")
+        # Glossário não tem campo de chave na tela — usa default_model + cofre.
+        # Se o default for DeepSeek mas só existir chave Zhipu/ZAI salva, faz
+        # fallback para qualquer provedor com chave (e alinha modelo/URL).
+        key, _source, key_provider = pf.resolve_any_api_key(provider, "")
         if not key:
             QMessageBox.warning(
                 self, "Sugerir via LLM",
-                "Nenhuma chave de API disponível — configure em "
-                "⚙ Configurações.")
+                "Nenhuma chave de API disponível.\n\n"
+                "• Em ⚙ Configurações → Provedores, cole a chave do Zhipu/ZAI\n"
+                "  (ou DeepSeek) e marque salvar no cofre do Windows; ou\n"
+                "• Defina ZHIPU_API_KEY / DEEPSEEK_API_KEY no ambiente; e\n"
+                "• Em Configurações → Modelos, defina o modelo padrão como um\n"
+                "  GLM (se for usar ZAI), para o app apontar ao provedor certo.")
             return
+        # Se a chave veio de outro provedor, use o modelo default daquele
+        # provedor (senão mandaríamos chave Zhipu para URL DeepSeek).
+        if key_provider and provider and key_provider != provider:
+            alt = st.probe_model_for_provider(key_provider)
+            if alt:
+                model = alt
+            provider = key_provider
         _rid, prof = st.resolve_effective_profile(model)
         base_url = str(prof.get("url") or "")
+        if not base_url and provider:
+            # effective provider URL from settings / code defaults
+            try:
+                urls = st.effective_providers()
+                base_url = str(urls.get(provider) or "")
+            except Exception:
+                base_url = ""
+        if not base_url and provider == "Zhipu GLM":
+            base_url = "https://open.bigmodel.cn/api/paas/v4"
 
         answer = QMessageBox.question(
             self, "Sugerir via LLM",
@@ -2856,6 +2879,78 @@ class TranslationWizard(QDialog):
             f"tradutor.py --mode preserve --resume --model {model}\n"
             f"entrada: {self.project.input_path()}\n"
             f"saída:   {output}")
+        self._refresh_resume_ui()
+
+    def _resume_state(self) -> Dict[str, Any]:
+        """Estado de retomada da Preservada (ou vazio se ainda não há input)."""
+        inp = self.project.input_path()
+        if inp is None or not inp.is_file():
+            return {"has_output": False, "complete": False, "pending": 0,
+                    "pct": 0.0, "done": 0, "nonempty": 0, "failed": 0,
+                    "missing": 0}
+        out = self.project.track_path(wp.TRACK_PRESERVED)
+        if out is None:
+            out = self.project.track_target(wp.TRACK_PRESERVED)
+        try:
+            return pf.summarize_resume_state(inp, out)
+        except Exception:
+            return {"has_output": False, "complete": False, "pending": 0,
+                    "pct": 0.0, "done": 0, "nonempty": 0, "failed": 0,
+                    "missing": 0}
+
+    def _refresh_resume_ui(self) -> None:
+        """Mostra Continuar se já existe master incompleto; sincroniza status."""
+        if self._proc is not None:
+            return
+        stt = self._resume_state()
+        incomplete = bool(stt.get("has_output") and not stt.get("complete")
+                          and int(stt.get("pending") or 0) > 0)
+        complete = bool(stt.get("complete"))
+
+        # Se o project.json diz "done" mas ainda faltam strings, corrige.
+        track = self.project.track_status(wp.TRACK_PRESERVED)
+        if incomplete and track.get("status") == wp.TRACK_STATUS_DONE:
+            try:
+                self.project.update_track(
+                    wp.TRACK_PRESERVED, wp.TRACK_STATUS_PENDING,
+                    translated=int(stt.get("done") or 0))
+            except Exception:
+                pass
+
+        if incomplete:
+            pct = stt.get("pct", 0)
+            pending = int(stt.get("pending") or 0)
+            failed = int(stt.get("failed") or 0)
+            missing = int(stt.get("missing") or 0)
+            self.btn_start.setVisible(False)
+            self.btn_continue.setVisible(True)
+            self.btn_continue.setText(
+                f"⏵ Continuar de onde parou ({pct:.0f}% · falta {pending:,})"
+                .replace(",", "."))
+            self.progress.setRange(0, max(1, int(stt.get("nonempty") or 1)))
+            self.progress.setValue(int(stt.get("done") or 0))
+            self.cnt_done.setText(
+                f"prontas: {int(stt.get('done') or 0):,}".replace(",", "."))
+            self.cnt_fail.setText(
+                f"falhas: {failed:,} · ausentes: {missing:,}"
+                .replace(",", "."))
+            self.cnt_eta.setText("retoma com --resume (não recomeça do zero)")
+            self.cmd_preview.setText(
+                self.cmd_preview.text()
+                + f"\n\n⏸ Progresso salvo: {pct:.1f}% "
+                f"({int(stt.get('done') or 0):,}/"
+                f"{int(stt.get('nonempty') or 0):,}). "
+                f"Faltam {pending:,} "
+                f"({missing:,} ainda sem PT + {failed:,} com falha). "
+                "Clique Continuar — o motor usa --resume e só manda o resto."
+                .replace(",", "."))
+        else:
+            self.btn_continue.setVisible(False)
+            self.btn_start.setVisible(True)
+            if complete:
+                self.btn_start.setText("▶ Rodar de novo (resume / reprocessar falhas)")
+            else:
+                self.btn_start.setText("▶ Iniciar tradução")
 
     def _build_command(self) -> tuple[list[str], dict[str, str]]:
         model = self._current_model()
@@ -3020,10 +3115,40 @@ class TranslationWizard(QDialog):
             summary = pf.summarize_output(output)
             # Registra o caminho exato do master (convenção versionada §2).
             self.project.set_track_file(wp.TRACK_PRESERVED, output)
-            self.project.update_track(
-                wp.TRACK_PRESERVED, wp.TRACK_STATUS_DONE,
-                translated=summary["translated"],
-                skipped_free=summary["skipped_free"])
+            # Só marca DONE se EN×PT estiver completo (sem missing/failed).
+            # Parar o app no meio ou falhas parciais não podem parecer
+            # "concluído" no dashboard — senão some o Continuar.
+            inp = self.project.input_path()
+            resume = (pf.summarize_resume_state(inp, output)
+                      if inp is not None else {"complete": True, "pending": 0,
+                                               "pct": 100.0, "failed": 0,
+                                               "missing": 0, "done": 0})
+            if resume.get("complete"):
+                self.project.update_track(
+                    wp.TRACK_PRESERVED, wp.TRACK_STATUS_DONE,
+                    translated=summary["translated"],
+                    skipped_free=summary["skipped_free"])
+            else:
+                self.project.update_track(
+                    wp.TRACK_PRESERVED, wp.TRACK_STATUS_PENDING,
+                    translated=int(resume.get("done") or summary["translated"]),
+                    skipped_free=summary["skipped_free"])
+                self.btn_start.setVisible(False)
+                self.btn_continue.setVisible(True)
+                self._refresh_resume_ui()
+                QMessageBox.information(
+                    self, "Progresso salvo — ainda não terminou",
+                    f"A trilha Preservada está em "
+                    f"{resume.get('pct', 0):.1f}% "
+                    f"({int(resume.get('done') or 0):,} prontas).\n"
+                    f"Ainda faltam {int(resume.get('pending') or 0):,} "
+                    f"strings "
+                    f"({int(resume.get('missing') or 0):,} ausentes + "
+                    f"{int(resume.get('failed') or 0):,} falhas).\n\n"
+                    "Use “Continuar de onde parou” — o motor retoma com "
+                    "--resume e não refaz o que já está pronto."
+                    .replace(",", "."))
+                return
         except (wp.ProjectError, wp.LocalizationFormatError) as exc:
             QMessageBox.warning(
                 self, "Tradução concluída, mas…",

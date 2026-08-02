@@ -171,6 +171,35 @@ class TestPreflightCounts(TempDirCase):
         self.assertNotIn("Plasma Gun", terms)
         self.assertNotIn("The", terms)
 
+    def test_candidates_drops_contractions_and_discourse(self):
+        texts = [
+            "It's fine. It's fine. It's fine. "
+            "I'll go. I'll go. I'll go. "
+            "However the Void Blade cuts. However the Void Blade cuts. "
+            "However the Void Blade cuts. "
+            "Whenever you fire. Whenever you fire. Whenever you fire.",
+        ]
+        result = pf.scan_candidate_terms(texts, glossary_keys=set(), min_count=3)
+        terms = [t for t, _ in result]
+        self.assertNotIn("It's", terms)
+        self.assertNotIn("I'll", terms)
+        self.assertNotIn("However", terms)
+        self.assertNotIn("Whenever", terms)
+        self.assertIn("Void Blade", terms)
+
+    def test_candidates_strips_encyclopedia_keys(self):
+        texts = [
+            "Deals {g|Encyclopedia:DamageGlossary}damage{/g}.",
+            "Deals {g|Encyclopedia:DamageGlossary}damage{/g}.",
+            "Deals {g|Encyclopedia:DamageGlossary}damage{/g}.",
+            "The Star Port opens. The Star Port opens. The Star Port opens.",
+        ]
+        result = pf.scan_candidate_terms(texts, glossary_keys=set(), min_count=3)
+        terms = [t for t, _ in result]
+        self.assertNotIn("Encyclopedia", terms)
+        self.assertNotIn("DamageGlossary", terms)
+        self.assertIn("Star Port", terms)
+
 
 class TestDurationHint(unittest.TestCase):
     def test_zero_batches(self):

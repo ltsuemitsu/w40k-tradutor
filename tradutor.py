@@ -217,15 +217,17 @@ class SmartGlossary:
         return "clean", []
 
     def en_to_pt_map(self) -> Dict[str, str]:
-        """EN (original case from glossary) → PT for free fullize replace."""
+        """EN (original case from glossary) → PT for free fullize replace.
+
+        Includes every entry with a real translation (EN ≠ PT). Fullize is a
+        free replace pass — it must not be limited to preserve-index terms
+        (those are for keeping EN during the LLM pass).
+        """
         out: Dict[str, str] = {}
         for entry in self.entries.values():
             en = (entry.get("term_english") or "").strip()
             pt = (entry.get("term_translated") or "").strip()
-            if not en or not pt:
-                continue
-            # Only entries that participate in preserve index
-            if en.lower() not in self._preserve_index:
+            if not en or not pt or en == pt:
                 continue
             out[en] = pt
         return out
